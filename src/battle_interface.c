@@ -545,10 +545,6 @@ u8 CreateBattlerHealthboxSprites(u8 battlerId)
     u8 healthbarSpriteId;
     struct Sprite *healthbarSprite;
 
-    // HP Percentage Mod: opponents' healthboxes always show their HP as a percentage
-    if (GetBattlerSide(battlerId) == B_SIDE_OPPONENT && !(gBattleTypeFlags & BATTLE_TYPE_SAFARI))
-        gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars = TRUE;
-
     if (!IsDoubleBattle())
     {
         if (GetBattlerSide(battlerId) == B_SIDE_PLAYER)
@@ -929,10 +925,43 @@ static void UpdateHpTextInHealthboxInDoubles(u8 healthboxSpriteId, s16 value, u8
     }
 }
 
-// HP Percentage Mod: opponents' HP text is shown as a percentage, e.g. " 45/100".
-static void UpdateOpponentHpPercentText(u8 healthboxSpriteId, s32 hp, s32 maxHp)
+// HP Percentage Mod: opponents show their HP percentage in place of the "HP" label in front of the health bar.
+static const u8 sTinyDigitFont[10][5] =
 {
-    s32 percent = 0;
+    {7, 5, 5, 5, 7},
+    {2, 6, 2, 2, 7},
+    {7, 1, 7, 4, 7},
+    {7, 1, 3, 1, 7},
+    {5, 5, 7, 1, 1},
+    {7, 4, 7, 1, 7},
+    {7, 4, 7, 5, 7},
+    {7, 1, 1, 2, 2},
+    {7, 5, 7, 5, 7},
+    {7, 5, 7, 1, 7},
+};
+
+static bool8 ShowsHpPercentage(u8 battlerId)
+{
+    return GetBattlerSide(battlerId) == B_SIDE_OPPONENT && !(gBattleTypeFlags & BATTLE_TYPE_SAFARI);
+}
+
+static void SetLabelPixel(u8 *tiles, u32 x, u32 y, u8 color)
+{
+    u8 *byte = &tiles[(x / 8) * TILE_SIZE_4BPP + y * 4 + (x % 8) / 2];
+
+    if (x % 2)
+        *byte = (*byte & 0x0F) | (color << 4);
+    else
+        *byte = (*byte & 0xF0) | color;
+}
+
+static void DrawHpPercentLabel(u8 battlerId, s32 hp, s32 maxHp)
+{
+    u8 healthBarSpriteId = gSprites[gHealthboxSpriteIds[battlerId]].sHealthBarSpriteId;
+    const u8 *label = GetBattleInterfaceGfxPtr(B_INTERFACE_GFX_HP_BAR_HP_TEXT);
+    u8 tiles[2 * TILE_SIZE_4BPP];
+    u8 digits[3];
+    s32 percent = 0, numDigits = 0, x, i, row, col;
 
     if (maxHp > 0 && hp > 0)
     {
@@ -940,8 +969,45 @@ static void UpdateOpponentHpPercentText(u8 healthboxSpriteId, s32 hp, s32 maxHp)
         if (percent == 0)
             percent = 1;
     }
-    UpdateHpTextInHealthboxInDoubles(healthboxSpriteId, percent, HP_CURRENT);
-    UpdateHpTextInHealthboxInDoubles(healthboxSpriteId, 100, HP_MAX);
+    do
+    {
+        digits[numDigits++] = percent % 10;
+        percent /= 10;
+    } while (percent != 0);
+
+    // Start from the "HP" label and erase its letters (colors 7 and 8), keeping the dark pill
+    for (i = 0; i < 2 * TILE_SIZE_4BPP; i++)
+    {
+        u8 lo = label[i] & 0xF, hi = label[i] >> 4;
+
+        if (lo == 7 || lo == 8)
+            lo = 6;
+        if (hi == 7 || hi == 8)
+            hi = 6;
+        tiles[i] = lo | (hi << 4);
+    }
+
+    // Right-aligned 3x5 digits in the label's letter colors
+    x = 14 - numDigits * 4;
+    for (i = numDigits - 1; i >= 0; i--, x += 4)
+    {
+        for (row = 0; row < 5; row++)
+        {
+            for (col = 0; col < 3; col++)
+            {
+                if (sTinyDigitFont[digits[i]][row] & (4 >> col))
+                    SetLabelPixel(tiles, x + col, 2 + row, row < 2 ? 7 : 8);
+            }
+        }
+    }
+    CpuCopy32(tiles, (void *)(OBJ_VRAM0 + gSprites[healthBarSpriteId].oam.tileNum * TILE_SIZE_4BPP), 2 * TILE_SIZE_4BPP);
+}
+
+static void DrawHpPercentLabelFromParty(u8 battlerId)
+{
+    struct Pokemon *mon = &gEnemyParty[gBattlerPartyIndexes[battlerId]];
+
+    DrawHpPercentLabel(battlerId, GetMonData(mon, MON_DATA_HP), GetMonData(mon, MON_DATA_MAX_HP));
 }
 
 // Prints mon's nature, catch and flee rate. Probably used to test pokeblock-related features.
@@ -1669,7 +1735,9 @@ static void UpdateStatusIconInHealthbox(u8 healthboxSpriteId)
                       (void *)(OBJ_VRAM0 + (gSprites[healthboxSpriteId].oam.tileNum + tileNumAdder + i) * TILE_SIZE_4BPP),
                       1 * TILE_SIZE_4BPP);
 
-        if (!gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars)
+        if (ShowsHpPercentage(battlerId))
+            DrawHpPercentLabelFromParty(battlerId);
+        else if (!gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars)
             CpuCopy32(GetBattleInterfaceGfxPtr(B_INTERFACE_GFX_HP_BAR_HP_TEXT),
                       (void *)(OBJ_VRAM0 + gSprites[healthBarSpriteId].oam.tileNum * TILE_SIZE_4BPP),
                       2 * TILE_SIZE_4BPP);
@@ -1684,7 +1752,11 @@ static void UpdateStatusIconInHealthbox(u8 healthboxSpriteId)
     FillPalette(sStatusIconColors[statusPalId], pltAdder + OBJ_PLTT_OFFSET, PLTT_SIZEOF(1));
     CpuCopy16(&gPlttBufferUnfaded[OBJ_PLTT_OFFSET + pltAdder], (u16 *)OBJ_PLTT + pltAdder, PLTT_SIZEOF(1));
     CpuCopy32(statusGfxPtr, (void *)(OBJ_VRAM0 + (gSprites[healthboxSpriteId].oam.tileNum + tileNumAdder) * TILE_SIZE_4BPP), 3 * TILE_SIZE_4BPP);
-    if (IsDoubleBattle() == TRUE || GetBattlerSide(battlerId) == B_SIDE_OPPONENT)
+    if (ShowsHpPercentage(battlerId))
+    {
+        DrawHpPercentLabelFromParty(battlerId);
+    }
+    else if (IsDoubleBattle() == TRUE || GetBattlerSide(battlerId) == B_SIDE_OPPONENT)
     {
         if (!gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars)
         {
@@ -1899,7 +1971,9 @@ s32 MoveBattleBar(u8 battlerId, u8 healthboxSpriteId, u8 whichBar, u8 unused)
 
     if (whichBar == EXP_BAR || (whichBar == HEALTH_BAR && !gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars))
         MoveBattleBarGraphically(battlerId, whichBar);
-    else if (GetBattlerSide(battlerId) == B_SIDE_OPPONENT && !(gBattleTypeFlags & BATTLE_TYPE_SAFARI))
+
+    // Keep the HP percentage in step with the bar as it drains or fills
+    if (whichBar == HEALTH_BAR && ShowsHpPercentage(battlerId))
     {
         s32 maxHp = gBattleSpritesDataPtr->battleBars[battlerId].maxValue;
         s32 hp = currentBarValue;
@@ -1912,7 +1986,7 @@ s32 MoveBattleBar(u8 battlerId, u8 healthboxSpriteId, u8 whichBar, u8 unused)
             if (hp > maxHp)
                 hp = maxHp;
         }
-        UpdateOpponentHpPercentText(healthboxSpriteId, hp, maxHp);
+        DrawHpPercentLabel(battlerId, hp, maxHp);
     }
 
     if (currentBarValue == -1)

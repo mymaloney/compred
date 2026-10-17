@@ -23,6 +23,8 @@
 #include "strings.h"
 #include "overworld.h"
 #include "party_menu.h"
+#include "daycare.h"
+#include "constants/daycare.h"
 #include "field_specials.h"
 #include "berry.h"
 #include "constants/items.h"
@@ -5802,55 +5804,75 @@ u32 CanMonLearnTMHM(struct Pokemon *mon, u8 tm)
     }
 }
 
+static bool8 TryAddRelearnerMove(u16 *moves, u8 *numMoves, const u16 *learnedMoves, u16 move)
+{
+    s32 i;
+
+    if (move == MOVE_NONE || IsMoveBanned(move) || *numMoves >= MAX_RELEARNER_MOVES)
+        return FALSE;
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        if (learnedMoves[i] == move)
+            return FALSE;
+    }
+    for (i = 0; i < *numMoves; i++)
+    {
+        if (moves[i] == move)
+            return FALSE;
+    }
+    moves[(*numMoves)++] = move;
+    return TRUE;
+}
+
+// Every move the Pokemon can relearn for free: its level-up moves up to its current level,
+// followed by its egg, TM/HM, tutor and other Gen 9 moves in alphabetical order.
 u8 GetMoveRelearnerMoves(struct Pokemon *mon, u16 *moves)
 {
     u16 learnedMoves[MAX_MON_MOVES];
+    u16 eggMoves[EGG_MOVES_ARRAY_COUNT * EVOS_PER_MON];
     u8 numMoves = 0;
+    u8 numLevelUpMoves, numEggMoves;
     u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
     u8 level = GetMonData(mon, MON_DATA_LEVEL, NULL);
-    int i, j, k;
+    s32 i, j;
 
     for (i = 0; i < MAX_MON_MOVES; i++)
         learnedMoves[i] = GetMonData(mon, MON_DATA_MOVE1 + i, NULL);
 
-    for (i = 0; i < MAX_LEVEL_UP_MOVES; i++)
+    for (i = 0; i < MAX_LEVEL_UP_MOVES && gLevelUpLearnsets[species][i] != LEVEL_UP_END; i++)
     {
-        u16 moveLevel;
-
-        if (gLevelUpLearnsets[species][i] == LEVEL_UP_END)
-            break;
-
-        moveLevel = gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_LV;
-
-        if (moveLevel <= (level << 9))
-        {
-            for (j = 0; j < MAX_MON_MOVES && learnedMoves[j] != (gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID); j++)
-                ;
-
-            if (j == MAX_MON_MOVES)
-            {
-                for (k = 0; k < numMoves && moves[k] != (gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID); k++)
-                    ;
-
-                if (k == numMoves)
-                    moves[numMoves++] = gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID;
-            }
-        }
+        if ((gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_LV) <= (level << 9))
+            TryAddRelearnerMove(moves, &numMoves, learnedMoves, gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID);
     }
+    numLevelUpMoves = numMoves;
+
+    numEggMoves = GetEvolutionLineEggMoves(species, eggMoves, ARRAY_COUNT(eggMoves));
+    for (i = 0; i < numEggMoves; i++)
+        TryAddRelearnerMove(moves, &numMoves, learnedMoves, eggMoves[i]);
+
+    for (i = 0; i < NUM_TECHNICAL_MACHINES + NUM_HIDDEN_MACHINES; i++)
+    {
+        if (CanMonLearnTMHM(mon, i))
+            TryAddRelearnerMove(moves, &numMoves, learnedMoves, ItemIdToBattleMoveId(ITEM_TM01 + i));
+    }
+
+    for (i = 0; i < TUTOR_MOVE_COUNT + 3; i++)
+        TryAddRelearnerMove(moves, &numMoves, learnedMoves, GetTutorMoveIfLearnable(species, i));
 
     if (gRelearnerExtraMoves[species] != NULL)
     {
-        const u16 *extraMoves = gRelearnerExtraMoves[species];
+        for (i = 0; gRelearnerExtraMoves[species][i] != MOVE_NONE; i++)
+            TryAddRelearnerMove(moves, &numMoves, learnedMoves, gRelearnerExtraMoves[species][i]);
+    }
 
-        for (i = 0; extraMoves[i] != MOVE_NONE && numMoves < MAX_RELEARNER_MOVES; i++)
-        {
-            for (j = 0; j < MAX_MON_MOVES && learnedMoves[j] != extraMoves[i]; j++)
-                ;
-            for (k = 0; k < numMoves && moves[k] != extraMoves[i]; k++)
-                ;
-            if (j == MAX_MON_MOVES && k == numMoves)
-                moves[numMoves++] = extraMoves[i];
-        }
+    // Sort everything after the level-up moves by name
+    for (i = numLevelUpMoves + 1; i < numMoves; i++)
+    {
+        u16 move = moves[i];
+
+        for (j = i; j > numLevelUpMoves && StringCompare(gMoveNames[moves[j - 1]], gMoveNames[move]) > 0; j--)
+            moves[j] = moves[j - 1];
+        moves[j] = move;
     }
 
     return numMoves;

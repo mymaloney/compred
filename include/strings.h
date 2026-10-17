@@ -311,6 +311,8 @@ extern const u8 gText_LureWildPokemon[];
 extern const u8 gText_ShareHp[];
 extern const u8 gText_ReturnToAHealingSpot[];
 extern const u8 gText_Summary5[];
+extern const u8 gText_PartyMenuMoves[];
+extern const u8 gText_PkmnHasNoMovesToLearn[];
 extern const u8 gText_Switch2[];
 extern const u8 gText_Item[];
 extern const u8 gText_Take[];

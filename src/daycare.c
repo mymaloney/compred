@@ -644,6 +644,42 @@ static void ClearAllDaycareData(struct DayCare *daycare)
 // Determines what the species of an Egg would be based on the given species.
 // It determines this by working backwards through the evolution chain of the
 // given species.
+// Fills moves with the egg moves of species and of every Pokemon it evolves from.
+u8 GetEvolutionLineEggMoves(u16 species, u16 *moves, u8 maxMoves)
+{
+    u8 numMoves = 0;
+    s32 stage, i, j, k;
+
+    for (stage = 0; stage < EVOS_PER_MON && species != SPECIES_NONE; stage++)
+    {
+        u16 preEvolution = SPECIES_NONE;
+
+        for (i = 0; i < (s32)NELEMS(gEggMoves) - 1; i++)
+        {
+            if (gEggMoves[i] == species + EGG_MOVES_SPECIES_OFFSET)
+            {
+                for (j = i + 1; gEggMoves[j] < EGG_MOVES_SPECIES_OFFSET && numMoves < maxMoves; j++)
+                    moves[numMoves++] = gEggMoves[j];
+                break;
+            }
+        }
+
+        for (j = 1; j < NUM_SPECIES && preEvolution == SPECIES_NONE; j++)
+        {
+            for (k = 0; k < EVOS_PER_MON; k++)
+            {
+                if (gEvolutionTable[j][k].targetSpecies == species)
+                {
+                    preEvolution = j;
+                    break;
+                }
+            }
+        }
+        species = preEvolution;
+    }
+    return numMoves;
+}
+
 static u16 GetEggSpecies(u16 species)
 {
     int i, j, k;

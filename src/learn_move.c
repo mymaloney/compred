@@ -151,6 +151,8 @@ struct LearnMoveGfxResources
 };
 
 static EWRAM_DATA struct LearnMoveGfxResources * sMoveRelearner = NULL;
+// Where to go when the relearner closes; NULL returns to the field (Move Maniac)
+static EWRAM_DATA MainCallback sMoveRelearnerExitCallback = NULL;
 
 static void Task_InitMoveRelearnerMenu(u8 taskId);
 static void CB2_MoveRelearner_Init(void);
@@ -366,9 +368,18 @@ static void VBlankCB_MoveRelearner(void)
 
 void TeachMoveRelearnerMove(void)
 {
+    sMoveRelearnerExitCallback = NULL;
     LockPlayerFieldControls();
     CreateTask(Task_InitMoveRelearnerMenu, 10);
     BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
+}
+
+// Opens the Move Relearner for a party member from the party menu, free of charge.
+void ShowMoveRelearnerFromPartyMenu(u8 partyIndex, MainCallback exitCallback)
+{
+    gSpecialVar_0x8004 = partyIndex;
+    sMoveRelearnerExitCallback = exitCallback;
+    SetMainCallback2(CB2_MoveRelearner_Init);
 }
 
 static void Task_InitMoveRelearnerMenu(u8 taskId)
@@ -619,7 +630,10 @@ static void MoveRelearnerStateMachine(void)
         {
             FreeAllWindowBuffers();
             Free(sMoveRelearner);
-            SetMainCallback2(CB2_ReturnToField);
+            if (sMoveRelearnerExitCallback != NULL)
+                SetMainCallback2(sMoveRelearnerExitCallback);
+            else
+                SetMainCallback2(CB2_ReturnToField);
         }
         break;
     case MENU_STATE_FADE_FROM_SUMMARY_SCREEN:

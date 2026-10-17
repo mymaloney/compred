@@ -7,6 +7,7 @@
 #include "pokeball.h"
 #include "random.h"
 #include "battle.h"
+#include "battle_eval.h"
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_message.h"
@@ -1338,8 +1339,61 @@ static void OpponentHandlePrintSelectionString(void)
 
 static void OpponentHandleChooseAction(void)
 {
+    if (BattleEval_IsDecidingForOpponent())
+    {
+        u8 kind, index, target;
+
+        // Still thinking: try again next frame
+        if (!BattleEval_GetOpponentAction(gActiveBattler, &kind, &index, &target))
+            return;
+        if (kind == EVAL_ACTION_SWITCH)
+        {
+            *(gBattleStruct->AI_monToSwitchIntoId + (GetBattlerPosition(gActiveBattler) >> 1)) = index;
+            *(gBattleStruct->monToSwitchIntoId + gActiveBattler) = index;
+            BtlController_EmitTwoReturnValues(1, B_ACTION_SWITCH, 0);
+        }
+        else
+        {
+            BtlController_EmitTwoReturnValues(1, B_ACTION_USE_MOVE, (gActiveBattler ^ BIT_SIDE) << 8);
+        }
+        OpponentBufferExecCompleted();
+        return;
+    }
     AI_TrySwitchOrUseItem();
     OpponentBufferExecCompleted();
+}
+
+// Sends the move the battle evaluation engine chose. Returns FALSE if it has none.
+static bool8 TryEmitEngineMove(void)
+{
+    struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleBufferA[gActiveBattler][4]);
+    u8 kind, index, target;
+    u16 move;
+
+    if (!BattleEval_IsDecidingForOpponent() || !BattleEval_GetOpponentAction(gActiveBattler, &kind, &index, &target))
+        return FALSE;
+    if (kind != EVAL_ACTION_MOVE)
+        return FALSE;
+    move = moveInfo->moves[index];
+    if (gBattleMoves[move].target & (MOVE_TARGET_USER_OR_SELECTED | MOVE_TARGET_USER))
+    {
+        target = gActiveBattler;
+    }
+    else if (gBattleMoves[move].target & MOVE_TARGET_BOTH)
+    {
+        target = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+        if (gAbsentBattlerFlags & gBitTable[target])
+            target = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);
+    }
+    else if (target >= gBattlersCount)
+    {
+        target = gActiveBattler ^ BIT_SIDE;
+        if (gAbsentBattlerFlags & gBitTable[target])
+            target ^= BIT_FLANK;
+    }
+    BtlController_EmitTwoReturnValues(1, 10, index | (target << 8));
+    OpponentBufferExecCompleted();
+    return TRUE;
 }
 
 static void OpponentHandleUnknownYesNoBox(void)
@@ -1352,6 +1406,8 @@ static void OpponentHandleChooseMove(void)
     u8 chosenMoveId;
     struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleBufferA[gActiveBattler][4]);
 
+    if (TryEmitEngineMove())
+        return;
     if (gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_FIRST_BATTLE | BATTLE_TYPE_SAFARI | BATTLE_TYPE_ROAMER))
     {
 
@@ -1413,7 +1469,9 @@ static void OpponentHandleChoosePokemon(void)
 
     if (*(gBattleStruct->AI_monToSwitchIntoId + (GetBattlerPosition(gActiveBattler) >> 1)) == PARTY_SIZE)
     {
-        chosenMonId = GetMostSuitableMonToSwitchInto();
+        chosenMonId = BattleEval_ChooseReplacement(gActiveBattler);
+        if (chosenMonId == PARTY_SIZE)
+            chosenMonId = GetMostSuitableMonToSwitchInto();
 
         if (chosenMonId == PARTY_SIZE)
         {

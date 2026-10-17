@@ -5,12 +5,13 @@
 #include "battle_main.h"
 #include "battle_util.h"
 #include "data.h"
+#include "event_data.h"
+#include "random.h"
 #include "item.h"
 #include "malloc.h"
 #include "pokedex.h"
 #include "pokemon.h"
 #include "string_util.h"
-#include "task.h"
 #include "util.h"
 #include "constants/abilities.h"
 #include "constants/battle_move_effects.h"
@@ -18,6 +19,9 @@
 #include "constants/items.h"
 #include "constants/moves.h"
 #include "constants/species.h"
+#include "constants/flags.h"
+#include "constants/opponents.h"
+#include "constants/trainers.h"
 
 // Battle evaluation engine.
 //
@@ -163,6 +167,8 @@ struct EvalReport
 {
     u16 decisions;
     u32 accuracySum;
+    u16 foeDecisions;
+    u32 foeAccuracySum;
     u16 counts[EVAL_GRADE_COUNT];
     u16 worstLoss;
     u8 worstTurn;
@@ -213,10 +219,15 @@ struct EvalWork
     u8 stepOpp;
     u8 numJointPlayer;
     u8 numJointOpponent;
-    u8 taskId;
     u8 simStage;
     s32 simMaterial;
     struct EvalAction simActs[MAX_BATTLERS_COUNT];
+    u16 playerStrategy[MAX_JOINT_PLAYER];
+    struct EvalAction aiAction[MAX_BATTLERS_COUNT];
+    u8 aiSkill;
+    u8 useAI:1;
+    u8 aiReady:1;
+    u8 choicesKnown:1;
 };
 
 static struct EvalWork *sWork; // in IWRAM, as it is read constantly
@@ -239,6 +250,7 @@ static struct EvalWork *sWork; // in IWRAM, as it is read constantly
 #define sJointPlayer    (sWork->jointPlayer)
 #define sJointOpponent  (sWork->jointOpponent)
 #define sOppStrategy    (sWork->oppStrategy)
+#define sPlayerStrategy (sWork->playerStrategy)
 #define sIsDouble       (sWork->isDouble)
 
 // gStatStageRatios as Q12 multipliers, for stages -6 to +6
@@ -281,6 +293,8 @@ static const u8 sText_Good[] = _(", good ");
 static const u8 sText_Inaccurate[] = _(", inaccurate ");
 static const u8 sText_Mistakes[] = _("\pMistakes ");
 static const u8 sText_Blunders[] = _(", blunders ");
+static const u8 sText_Percent[] = _("%");
+static const u8 sText_FoeAccuracy[] = _("\nFoe accuracy: ");
 static const u8 sText_BiggestSlip[] = _("\pBiggest slip, turn ");
 static const u8 sText_Colon[] = _(":\n");
 static const u8 sText_Used[] = _(" used ");
@@ -290,6 +304,8 @@ static const u8 sText_Using[] = _("\pusing ");
 static const u8 sText_SwitchingTo[] = _("\pswitching to ");
 static const u8 sText_WasBetter[] = _("\nwas the stronger play.");
 static const u8 sText_HoldingBack[] = _("\pholding back");
+
+#include "data/trainer_ai_skill.h"
 
 #ifdef EVAL_DEBUG
 #define REG_MGBA_DEBUG_ENABLE (*(vu16 *)0x4FFF780)
@@ -2708,8 +2724,7 @@ static s32 GetPruneKeep(u8 battler)
 {
     if (!sIsDouble)
         return MAX_OPTIONS;
-    // The player's own choice is always kept on top of the best few
-    return IsPlayerBattler(battler) ? PRUNED_OPTIONS + 1 : PRUNED_OPTIONS;
+    return PRUNED_OPTIONS;
 }
 
 // Keeps each battler's most promising options, judged against the other
@@ -2806,12 +2821,16 @@ static void SolveEquilibrium(u8 np, u8 no)
     s32 stratP[MAX_JOINT_PLAYER], stratO[MAX_JOINT_OPPONENT];
     s32 uP[MAX_JOINT_PLAYER], uO[MAX_JOINT_OPPONENT];
     u32 sumO[MAX_JOINT_OPPONENT];
+    u32 sumP[MAX_JOINT_PLAYER];
     u32 total = 0;
     s32 it, v;
     u8 p, o;
 
     for (p = 0; p < np; p++)
+    {
         regP[p] = 0;
+        sumP[p] = 0;
+    }
     for (o = 0; o < no; o++)
     {
         regO[o] = 0;
@@ -2844,6 +2863,7 @@ static void SolveEquilibrium(u8 np, u8 no)
             regP[p] += uP[p] - v;
             if (regP[p] < 0)
                 regP[p] = 0;
+            sumP[p] += stratP[p] * (it + 1) / 16;
         }
         for (o = 0; o < no; o++)
         {
@@ -2857,6 +2877,11 @@ static void SolveEquilibrium(u8 np, u8 no)
         total += sumO[o];
     for (o = 0; o < no; o++)
         sOppStrategy[o] = total ? (sumO[o] * Q_ONE) / total : Q_ONE / no;
+    total = 0;
+    for (p = 0; p < np; p++)
+        total += sumP[p];
+    for (p = 0; p < np; p++)
+        sPlayerStrategy[p] = total ? (sumP[p] * Q_ONE) / total : Q_ONE / np;
 }
 
 static u8 GetGrade(u16 lossTenths)
@@ -2871,20 +2896,29 @@ static u8 GetGrade(u16 lossTenths)
     return EVAL_GRADE_BLUNDER;
 }
 
-static void RecordDecision(u8 battler, s32 loss, const struct EvalAction *chosen, const struct EvalAction *best)
+static u16 GetLossTenths(s32 loss)
 {
-    u16 lossTenths, accuracy;
-    u8 pct;
-    u8 id = sRoot.active[battler];
-
     if (loss < 0)
         loss = 0;
-    lossTenths = loss * 1000 / Q_ONE;
-    pct = lossTenths / 10;
+    return loss * 1000 / Q_ONE;
+}
+
+// Accuracy (0-100) of a decision that gave up `loss` win probability
+static u8 GetDecisionAccuracy(s32 loss)
+{
+    u16 lossTenths = GetLossTenths(loss);
+    u8 pct = lossTenths / 10;
+
     if (pct >= 100)
-        accuracy = 0;
-    else
-        accuracy = (sDecisionAccuracy[pct] * (10 - lossTenths % 10) + sDecisionAccuracy[pct + 1] * (lossTenths % 10)) / 10;
+        return 0;
+    return (sDecisionAccuracy[pct] * (10 - lossTenths % 10) + sDecisionAccuracy[pct + 1] * (lossTenths % 10)) / 10;
+}
+
+static void RecordDecision(u8 battler, s32 loss, const struct EvalAction *chosen, const struct EvalAction *best)
+{
+    u16 lossTenths = GetLossTenths(loss);
+    u8 accuracy = GetDecisionAccuracy(loss);
+    u8 id = sRoot.active[battler];
 
     sReport.decisions++;
     sReport.accuracySum += accuracy;
@@ -2904,20 +2938,12 @@ static void RecordDecision(u8 battler, s32 loss, const struct EvalAction *chosen
     EvalLog("grade", battler, lossTenths, accuracy, sReport.decisions);
 }
 
-static bool8 ShouldGrade(void)
-{
-    if (!(gBattleTypeFlags & BATTLE_TYPE_TRAINER))
-        return FALSE;
-    if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI | BATTLE_TYPE_SAFARI | BATTLE_TYPE_OLD_MAN_TUTORIAL | BATTLE_TYPE_POKEDUDE))
-        return FALSE;
-    return TRUE;
-}
-
 enum
 {
     PHASE_PRUNE,
     PHASE_MATRIX,
     PHASE_SOLVE,
+    PHASE_WAIT, // for everyone's choices
     PHASE_GRADE,
     PHASE_DONE,
 };
@@ -2935,22 +2961,20 @@ static void StartGrading(void)
 
     for (b = 0; b < MAX_BATTLERS_COUNT; b++)
     {
+        sChosen[b].kind = ACT_NONE;
+        sChosen[b].index = 0;
+        sChosen[b].target = NO_TARGET;
         if (b < gBattlersCount)
         {
             BuildOptions(b);
-            GetChosenAction(b, &sChosen[b]);
         }
         else
         {
             sNumOptions[b] = 0;
             AddOption(b, ACT_NONE, 0, NO_TARGET);
             sForced[b] = TRUE;
-            sChosen[b] = sOptions[b][0];
         }
         GetGreedyAction(&sRoot, b, &sDefault[b]);
-        // Moves the player picked that the engine wouldn't list, such as hitting a partner
-        if (IsPlayerBattler(b) && sChosen[b].kind != ACT_NONE && FindOption(b, &sChosen[b]) < 0)
-            AddOption(b, sChosen[b].kind, sChosen[b].index, sChosen[b].target);
     }
     sWork->phase = PHASE_PRUNE;
     sWork->stepBattler = 0;
@@ -2972,7 +2996,7 @@ static u8 PreparePrune(void)
 
     if (b >= gBattlersCount)
         return STEP_DONE;
-    if (sNumOptions[b] <= GetPruneKeep(b))
+    if (sNumOptions[b] <= GetPruneKeep(b) && !(sWork->useAI && sIsDouble && !IsPlayerBattler(b) && sNumOptions[b] > 1))
     {
         sNumPruned[b] = 0;
         for (i = 0; i < sNumOptions[b]; i++)
@@ -3088,18 +3112,25 @@ static u8 PrepareGrade(void)
         sWork->stepOpp++;
         return STEP_NEXT;
     }
-    if (!sIsDouble)
+    if (!sIsDouble && i < sWork->numJointPlayer)
     {
-        // Every option is in the matrix, in order
+        // Every option the engine listed is in the matrix, in order
         sWork->valueSums[i] += sOppStrategy[o] * sMatrix[i][o];
         sWork->valueWeights[i] += sOppStrategy[o];
         sWork->stepOpp++;
         return STEP_NEXT;
     }
     sWork->simActs[1] = sOptions[1][sJointOpponent[o][0]];
-    sWork->simActs[3] = sOptions[3][sJointOpponent[o][1]];
     sWork->simActs[b] = *opt;
-    sWork->simActs[partner] = (sChosen[partner].kind != ACT_NONE) ? sChosen[partner] : sDefault[partner];
+    if (sIsDouble)
+    {
+        sWork->simActs[3] = sOptions[3][sJointOpponent[o][1]];
+        sWork->simActs[partner] = (sChosen[partner].kind != ACT_NONE) ? sChosen[partner] : sDefault[partner];
+    }
+    else
+    {
+        sWork->simActs[2].kind = sWork->simActs[3].kind = ACT_NONE;
+    }
     return STEP_SIMULATE;
 }
 
@@ -3113,8 +3144,186 @@ static void StoreGrade(u16 v)
     sWork->stepOpp++;
 }
 
-// Does one step of grading, at most one simulated turn. Returns TRUE when grading is finished.
-static bool8 GradingStep(void)
+// --------------------------------------------------------------------------
+// Opponent AI
+// --------------------------------------------------------------------------
+
+static u8 GetAISkill(void)
+{
+    if (FlagGet(FLAG_SYS_GAME_CLEAR))
+        return 100;
+    if ((gBattleTypeFlags & BATTLE_TYPE_TRAINER_TOWER) || gTrainerBattleOpponent_A >= NUM_TRAINERS)
+        return 100;
+    return sTrainerAISkill[gTrainerBattleOpponent_A];
+}
+
+// Picks one of `n` options. `best` is how a perfect player would choose (Q12
+// probabilities) and `accuracy` is each option's decision accuracy. The choice
+// is drawn from a blend of `best` and uniform (or, below the uniform blend's
+// accuracy, of uniform and a lean towards the worst options) that makes the
+// expected accuracy equal to the target `skill`.
+static u8 PickWithSkill(const u16 *best, const u8 *accuracy, u8 n, u8 skill, u8 excluded)
+{
+    s32 probs[MAX_OPTIONS];
+    s32 eBest = 0, eUnif = 0, eWorst = 0, worstTotal = 0;
+    s32 target = skill * 16;
+    s32 lambda, total = 0, r;
+    u8 i;
+
+    if (n <= 1)
+        return 0;
+    for (i = 0; i < n; i++)
+    {
+        eBest += best[i] * accuracy[i];
+        eUnif += accuracy[i];
+        eWorst += (100 - accuracy[i]) * accuracy[i];
+        worstTotal += 100 - accuracy[i];
+    }
+    eBest >>= 8;                // accuracy * 16
+    eUnif = eUnif * 16 / n;
+    eWorst = worstTotal ? eWorst * 16 / worstTotal : eUnif;
+
+    for (i = 0; i < n; i++)
+    {
+        s32 unif = Q_ONE / n;
+
+        if (target >= eUnif)
+        {
+            lambda = (eBest > eUnif) ? (target - eUnif) * Q_ONE / (eBest - eUnif) : Q_ONE;
+            if (lambda > Q_ONE)
+                lambda = Q_ONE;
+            probs[i] = QM(lambda, best[i]) + QM(Q_ONE - lambda, unif);
+        }
+        else
+        {
+            s32 worst = worstTotal ? (100 - accuracy[i]) * Q_ONE / worstTotal : unif;
+
+            lambda = (eUnif > eWorst) ? (eUnif - target) * Q_ONE / (eUnif - eWorst) : 0;
+            if (lambda > Q_ONE)
+                lambda = Q_ONE;
+            probs[i] = QM(lambda, worst) + QM(Q_ONE - lambda, unif);
+        }
+        if (i == excluded)
+            probs[i] = 0;
+        total += probs[i];
+    }
+    if (total <= 0)
+        return (excluded == 0 && n > 1) ? 1 : 0;
+    r = (Random() * total) >> 16;
+    for (i = 0; i < n; i++)
+    {
+        if (r < probs[i])
+            return i;
+        r -= probs[i];
+    }
+    return n - 1;
+}
+
+// Decides what each opponent Pokemon does this turn, once the equilibrium is known
+static void ChooseAIActions(void)
+{
+    u8 k;
+
+    sWork->aiReady = TRUE;
+    // A perfect player follows the equilibrium mix of joint options
+    EvalLog("ai ready", gMain.vblankCounter2, sWork->aiSkill, 0, 0);
+    if (sWork->aiSkill >= 100)
+    {
+        u32 r = (Random() * Q_ONE) >> 16;
+        u8 o;
+
+        for (o = 0; o < sWork->numJointOpponent - 1; o++)
+        {
+            if (r < sOppStrategy[o])
+                break;
+            r -= sOppStrategy[o];
+        }
+        sWork->aiAction[1] = sOptions[1][sJointOpponent[o][0]];
+        sWork->aiAction[3] = sOptions[3][sJointOpponent[o][1]];
+        if (gBattlersCount > 1 && !sForced[1])
+        {
+            sReport.foeDecisions++;
+            sReport.foeAccuracySum += 100;
+        }
+        if (sIsDouble && !sForced[3])
+        {
+            sReport.foeDecisions++;
+            sReport.foeAccuracySum += 100;
+        }
+        return;
+    }
+
+    for (k = 0; k < (sIsDouble ? 2 : 1); k++)
+    {
+        u8 b = B_POSITION_OPPONENT_LEFT + 2 * k;
+        u16 values[MAX_OPTIONS];
+        u16 best[MAX_OPTIONS];
+        u8 accuracy[MAX_OPTIONS];
+        u8 i, o, n = sNumOptions[b], pick, excluded = 0xFF;
+        s32 top = 0;
+
+        sWork->aiAction[b] = sOptions[b][0];
+        if (sForced[b] || n <= 1)
+            continue;
+        for (i = 0; i < n; i++)
+        {
+            best[i] = 0;
+            if (sIsDouble)
+            {
+                values[i] = sWork->values[b][i];
+            }
+            else
+            {
+                // Against the player's equilibrium mix; every option is in the matrix
+                s32 v = 0;
+                u8 p;
+
+                for (p = 0; p < sWork->numJointPlayer; p++)
+                    v += QM(sPlayerStrategy[p], sMatrix[p][i]);
+                values[i] = Q_ONE - v;
+            }
+            if (values[i] > top)
+                top = values[i];
+        }
+        for (o = 0; o < sWork->numJointOpponent; o++)
+            best[sJointOpponent[o][k]] += sOppStrategy[o];
+        for (i = 0; i < n; i++)
+        {
+            accuracy[i] = GetDecisionAccuracy(top - values[i]);
+            // Partners can't both switch to the same Pokemon
+            if (k == 1 && sWork->aiAction[1].kind == ACT_SWITCH && sOptions[b][i].kind == ACT_SWITCH
+             && sOptions[b][i].index == sWork->aiAction[1].index)
+                excluded = i;
+        }
+        pick = PickWithSkill(best, accuracy, n, sWork->aiSkill, excluded);
+        sWork->aiAction[b] = sOptions[b][pick];
+        EvalLog("ai pick", b, sOptions[b][pick].kind == ACT_MOVE ? sMons[sRoot.active[b]].moves[sOptions[b][pick].index] : sOptions[b][pick].index, accuracy[pick], sWork->aiSkill);
+        sReport.foeDecisions++;
+        sReport.foeAccuracySum += accuracy[pick];
+    }
+}
+
+// --------------------------------------------------------------------------
+// Turn control
+// --------------------------------------------------------------------------
+
+enum
+{
+    STEP_RESULT_BUSY,
+    STEP_RESULT_IDLE,     // waiting for everyone's choices
+    STEP_RESULT_FINISHED,
+};
+
+static void StartGradePhase(void)
+{
+    sWork->phase = PHASE_GRADE;
+    sWork->stepBattler = B_POSITION_PLAYER_LEFT;
+    sWork->stepIndex = 0;
+    sWork->stepOpp = 0;
+}
+
+// Does one step of the turn's evaluation, at most one simulated turn
+static u8 EvalStep(void)
 {
     u8 o, result;
     u16 v;
@@ -3136,7 +3345,7 @@ static bool8 GradingStep(void)
                 break;
             }
         }
-        return FALSE;
+        return STEP_RESULT_BUSY;
     }
 
     switch (sWork->phase)
@@ -3148,7 +3357,7 @@ static bool8 GradingStep(void)
             sWork->numJointPlayer = BuildJointOptions(B_SIDE_PLAYER, sJointPlayer, MAX_JOINT_PLAYER);
             sWork->numJointOpponent = BuildJointOptions(B_SIDE_OPPONENT, sJointOpponent, MAX_JOINT_OPPONENT);
             if (sWork->numJointPlayer == 0 || sWork->numJointOpponent == 0)
-                return TRUE;
+                return STEP_RESULT_FINISHED;
             sWork->phase = PHASE_MATRIX;
             sWork->stepIndex = 0;
             sWork->stepOpp = 0;
@@ -3163,29 +3372,31 @@ static bool8 GradingStep(void)
         SolveEquilibrium(sWork->numJointPlayer, sWork->numJointOpponent);
         for (o = 0; o < sWork->numJointOpponent; o++)
             EvalLog("opp", sJointOpponent[o][0], sJointOpponent[o][1], sOppStrategy[o], 0);
-        sWork->phase = PHASE_GRADE;
-        sWork->stepBattler = B_POSITION_PLAYER_LEFT;
-        sWork->stepIndex = 0;
-        sWork->stepOpp = 0;
-        return FALSE;
+        if (sWork->useAI)
+            ChooseAIActions();
+        if (sWork->choicesKnown)
+            StartGradePhase();
+        else
+            sWork->phase = PHASE_WAIT;
+        return STEP_RESULT_BUSY;
+    case PHASE_WAIT:
+        return STEP_RESULT_IDLE;
     case PHASE_GRADE:
         result = PrepareGrade();
         if (result == STEP_DONE)
-            return TRUE;
+            return STEP_RESULT_FINISHED;
         break;
     default:
-        return TRUE;
+        return STEP_RESULT_FINISHED;
     }
     if (result == STEP_SIMULATE)
         BeginSimulation();
-    return FALSE;
+    return STEP_RESULT_BUSY;
 }
 
-static void EndGrading(void)
+static void EndEvaluation(void)
 {
-    EvalLog("grade end", gMain.vblankCounter2, 0, 0, 0);
-    if (sWork->taskId != TASK_NONE)
-        DestroyTask(sWork->taskId);
+    EvalLog("eval end", gMain.vblankCounter2, 0, 0, 0);
     FREE_AND_SET_NULL(sWork);
 }
 
@@ -3197,26 +3408,52 @@ static s32 GetScanlinesLeft(void)
     return (line >= DISPLAY_HEIGHT) ? (228 - line + DISPLAY_HEIGHT) : (DISPLAY_HEIGHT - line);
 }
 
-// Grades in the background, in whatever time each frame has to spare
-static void Task_GradeInBackground(u8 taskId)
-{
-    while (GetScanlinesLeft() > 64)
-    {
-        if (GradingStep())
-        {
-            EndGrading();
-            return;
-        }
-    }
-}
-
-static void FinishGrading(void)
+// Called every frame of the battle: evaluates in the background, in whatever
+// time the frame has to spare. (Not a task, as the bag and party screens reset those.)
+void BattleEval_Update(void)
 {
     if (sWork == NULL)
         return;
-    while (!GradingStep())
+    while (GetScanlinesLeft() > 56)
+    {
+        u8 result = EvalStep();
+
+        if (result == STEP_RESULT_FINISHED)
+        {
+            EndEvaluation();
+            return;
+        }
+        if (result == STEP_RESULT_IDLE)
+            return;
+    }
+}
+
+// Runs the evaluation still in progress to the end
+static void FinishEvaluation(void)
+{
+    if (sWork == NULL)
+        return;
+    while (EvalStep() == STEP_RESULT_BUSY)
         ;
-    EndGrading();
+    EndEvaluation();
+}
+
+static bool8 ShouldEvaluate(void)
+{
+    if (!(gBattleTypeFlags & BATTLE_TYPE_TRAINER))
+        return FALSE;
+    if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI | BATTLE_TYPE_SAFARI | BATTLE_TYPE_OLD_MAN_TUTORIAL | BATTLE_TYPE_POKEDUDE))
+        return FALSE;
+    return TRUE;
+}
+
+static bool8 AllocWork(void)
+{
+    sWork = AllocZeroed(sizeof(struct EvalWork));
+    if (sWork == NULL)
+        return FALSE;
+    sIsDouble = (gBattleTypeFlags & BATTLE_TYPE_DOUBLE) != 0;
+    return TRUE;
 }
 
 void BattleEval_Reset(void)
@@ -3225,31 +3462,144 @@ void BattleEval_Reset(void)
 
     sReport.decisions = 0;
     sReport.accuracySum = 0;
+    sReport.foeDecisions = 0;
+    sReport.foeAccuracySum = 0;
     for (i = 0; i < EVAL_GRADE_COUNT; i++)
         sReport.counts[i] = 0;
     sReport.worstLoss = 0;
     sReport.worstTurn = 0;
     gEvalReportReady = FALSE;
-    if (sWork != NULL)
-    {
-        // Left over from a battle that ended abruptly
-        if (sWork->taskId != TASK_NONE && gTasks[sWork->taskId].func == Task_GradeInBackground)
-            DestroyTask(sWork->taskId);
-        FREE_AND_SET_NULL(sWork);
-    }
+    // Left over from a battle that ended abruptly
+    TRY_FREE_AND_SET_NULL(sWork);
 }
 
+// Called as the battlers start choosing their actions for a turn. The opponent
+// thinks while the player chooses.
+void BattleEval_StartTurn(void)
+{
+    FinishEvaluation();
+    if (!ShouldEvaluate() || !AllocWork())
+        return;
+    EvalLog("eval start", gMain.vblankCounter2, sizeof(struct EvalWork), 0, 0);
+    sWork->useAI = TRUE;
+    sWork->aiSkill = GetAISkill();
+    StartGrading();
+}
+
+// Called once every battler has chosen: grades the player's choices
 void BattleEval_GradeTurn(void)
 {
-    FinishGrading();
-    if (!ShouldGrade())
-        return;
-    sWork = AllocZeroed(sizeof(struct EvalWork));
+    u8 b;
+
     if (sWork == NULL)
         return;
-    EvalLog("grade start", gMain.vblankCounter2, sizeof(struct EvalWork), 0, 0);
-    StartGrading();
-    sWork->taskId = CreateTask(Task_GradeInBackground, 0xFF);
+    for (b = 0; b < gBattlersCount; b++)
+    {
+        GetChosenAction(b, &sChosen[b]);
+        // Moves the player picked that the engine wouldn't list, such as hitting a partner
+        if (IsPlayerBattler(b) && sChosen[b].kind != ACT_NONE && FindOption(b, &sChosen[b]) < 0)
+            AddOption(b, sChosen[b].kind, sChosen[b].index, sChosen[b].target);
+    }
+    sWork->choicesKnown = TRUE;
+    if (sWork->phase == PHASE_WAIT)
+        StartGradePhase();
+}
+
+bool8 BattleEval_IsDecidingForOpponent(void)
+{
+    return sWork != NULL && sWork->useAI;
+}
+
+// Gets the engine's choice for an opponent battler. Returns FALSE while it is still thinking.
+bool8 BattleEval_GetOpponentAction(u8 battler, u8 *kind, u8 *index, u8 *target)
+{
+    const struct EvalAction *act;
+
+    if (sWork == NULL || !sWork->aiReady)
+        return FALSE;
+    act = &sWork->aiAction[battler];
+    *target = act->target;
+    switch (act->kind)
+    {
+    case ACT_SWITCH:
+        *kind = EVAL_ACTION_SWITCH;
+        *index = act->index - PARTY_SIZE;
+        break;
+    case ACT_MOVE:
+        *kind = EVAL_ACTION_MOVE;
+        *index = act->index;
+        break;
+    default:
+        *kind = EVAL_ACTION_NONE;
+        *index = 0;
+        break;
+    }
+    return TRUE;
+}
+
+// Picks which Pokemon an opponent sends out after one faints, by playing out
+// a couple of turns with each candidate. Returns PARTY_SIZE to leave it to the old AI.
+u8 BattleEval_ChooseReplacement(u8 battler)
+{
+    u16 values[PARTY_SIZE], best[PARTY_SIZE];
+    u8 accuracy[PARTY_SIZE], candidates[PARTY_SIZE];
+    u8 n = 0, i, b, pick, partnerPick;
+    s32 top = 0;
+
+    FinishEvaluation();
+    if (!ShouldEvaluate() || !AllocWork())
+        return PARTY_SIZE;
+    sWork->turnNumber = gBattleResults.battleTurnCounter + 1;
+    BuildTypeChart();
+    BuildMons();
+    BuildRootState();
+    BuildDamageTables();
+
+    partnerPick = sIsDouble ? gBattleStruct->monToSwitchIntoId[battler ^ BIT_FLANK] : PARTY_SIZE;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        u8 id = PARTY_SIZE + i;
+        struct EvalAction acts[MAX_BATTLERS_COUNT];
+        s32 material;
+        u8 turn;
+
+        if (!sMons[id].present || sRoot.mons[id].alive == 0 || IsActive(&sRoot, id) || i == partnerPick)
+            continue;
+        sSim = sRoot;
+        DoSwitch(&sSim, battler, id);
+        material = GetMaterial(&sSim);
+        for (turn = 0; turn < 2; turn++)
+        {
+            for (b = 0; b < gBattlersCount; b++)
+                GetRolloutAction(&sSim, b, &acts[b]);
+            SimulateTurn(&sSim, acts);
+            material += GetMaterial(&sSim);
+        }
+        values[n] = Q_ONE - GetWinProb(material / 3);
+        if (values[n] > top)
+            top = values[n];
+        candidates[n++] = i;
+    }
+    if (n == 0)
+    {
+        FREE_AND_SET_NULL(sWork);
+        return PARTY_SIZE;
+    }
+
+    // A perfect player splits evenly between the best candidates
+    for (i = 0, b = 0; i < n; i++)
+    {
+        accuracy[i] = GetDecisionAccuracy(top - values[i]);
+        if (accuracy[i] == 100)
+            b++;
+    }
+    for (i = 0; i < n; i++)
+        best[i] = (accuracy[i] == 100) ? Q_ONE / b : 0;
+    pick = PickWithSkill(best, accuracy, n, GetAISkill(), 0xFF);
+    sReport.foeDecisions++;
+    sReport.foeAccuracySum += accuracy[pick];
+    FREE_AND_SET_NULL(sWork);
+    return candidates[pick];
 }
 
 void BattleEval_BuildReport(void)
@@ -3257,7 +3607,7 @@ void BattleEval_BuildReport(void)
     u8 *s = gEvalReportText;
     u16 accuracy;
 
-    FinishGrading();
+    FinishEvaluation();
     gEvalReportReady = FALSE;
     if (sReport.decisions == 0)
         return;
@@ -3275,6 +3625,12 @@ void BattleEval_BuildReport(void)
     s = ConvertIntToDecimalStringN(s, sReport.counts[EVAL_GRADE_MISTAKE], STR_CONV_MODE_LEFT_ALIGN, 3);
     s = StringCopy(s, sText_Blunders);
     s = ConvertIntToDecimalStringN(s, sReport.counts[EVAL_GRADE_BLUNDER], STR_CONV_MODE_LEFT_ALIGN, 3);
+    if (sReport.foeDecisions != 0)
+    {
+        s = StringCopy(s, sText_FoeAccuracy);
+        s = ConvertIntToDecimalStringN(s, (sReport.foeAccuracySum + sReport.foeDecisions / 2) / sReport.foeDecisions, STR_CONV_MODE_LEFT_ALIGN, 3);
+        s = StringCopy(s, sText_Percent);
+    }
 
     // Point out the costliest decision, if it was at least an inaccuracy
     if (sReport.worstLoss > sGradeThresholds[EVAL_GRADE_BEST + 1])

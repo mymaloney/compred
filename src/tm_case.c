@@ -410,7 +410,8 @@ static const u16 sTMSpritePaletteOffsetByType[NUMBER_OF_MON_TYPES] = {
     [TYPE_PSYCHIC]  = 0x0d0,
     [TYPE_STEEL]    = 0x0e0,
     [TYPE_DARK]     = 0x0f0,
-    [TYPE_DRAGON]   = 0x100
+    [TYPE_DRAGON]   = 0x100,
+    [TYPE_FAIRY]    = 0x0d0, // No Fairy disc palette; reuse Psychic's
 };
 
 void InitTMCase(u8 type, void (* exitCallback)(void), bool8 allowSelectClose)
@@ -1721,8 +1722,8 @@ static void SpriteCB_SwapDisc(struct Sprite *sprite)
     }
 }
 
-// - 1 excludes TYPE_MYSTERY
-#define NUM_DISC_COLORS ((NUMBER_OF_MON_TYPES - 1) * 16)
+// - 2 excludes TYPE_MYSTERY and TYPE_FAIRY, which have no disc palettes
+#define NUM_DISC_COLORS ((NUMBER_OF_MON_TYPES - 2) * 16)
 
 static void LoadDiscTypePalettes(void)
 {

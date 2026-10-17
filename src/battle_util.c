@@ -299,12 +299,149 @@ void BattleScriptPop(void)
     gBattlescriptCurrInstr = gBattleResources->battleScriptsStack->ptr[--gBattleResources->battleScriptsStack->size];
 }
 
+// Moves banned by the battle rules (OHKO, Evasion Moves and the ADV OU bans).
+static const u16 sBannedMoves[] =
+{
+    MOVE_FISSURE,
+    MOVE_HORN_DRILL,
+    MOVE_GUILLOTINE,
+    MOVE_SHEER_COLD,
+    MOVE_MINIMIZE,
+    MOVE_DOUBLE_TEAM,
+    MOVE_BATON_PASS,
+    MOVE_EXPLOSION,
+    MOVE_SELF_DESTRUCT,
+    MOVE_SWAGGER,
+};
+
+bool8 IsMoveBanned(u16 move)
+{
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sBannedMoves); i++)
+    {
+        if (sBannedMoves[i] == move)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// Party members that can't battle under the Uber ban, Species Clause or Nickname Clause.
+// They're recorded by personality at the start of the battle because the battle party
+// menu reorders gPlayerParty while it's open.
+static EWRAM_DATA u32 sBenchedMonPersonalities[PARTY_SIZE] = {0};
+static EWRAM_DATA u8 sBenchedMonCount = 0;
+
+// Sleep Clause: the Pokemon on each side that an opponent put to sleep (Rest doesn't count).
+static EWRAM_DATA u32 sSleepClauseMonPersonality[NUM_BATTLE_SIDES] = {0};
+static EWRAM_DATA bool8 sSleepClauseSet[NUM_BATTLE_SIDES] = {0};
+
+bool8 IsSleepClauseActive(u8 battlerId)
+{
+    u8 side = GetBattlerSide(battlerId);
+    struct Pokemon *party = (side == B_SIDE_PLAYER) ? gPlayerParty : gEnemyParty;
+    s32 i;
+
+    if (!sSleepClauseSet[side])
+        return FALSE;
+
+    // The sleeping Pokemon's battle data is current while it's in battle; otherwise use its party data
+    for (i = 0; i < gBattlersCount; i++)
+    {
+        if (GetBattlerSide(i) == side && gBattleMons[i].hp != 0
+         && gBattleMons[i].personality == sSleepClauseMonPersonality[side])
+        {
+            if (gBattleMons[i].status1 & STATUS1_SLEEP)
+                return TRUE;
+            sSleepClauseSet[side] = FALSE;
+            return FALSE;
+        }
+    }
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        if (GetMonData(&party[i], MON_DATA_PERSONALITY) == sSleepClauseMonPersonality[side]
+         && GetMonData(&party[i], MON_DATA_HP) != 0
+         && (GetMonData(&party[i], MON_DATA_STATUS) & STATUS1_SLEEP))
+            return TRUE;
+    }
+    sSleepClauseSet[side] = FALSE;
+    return FALSE;
+}
+
+void SetSleepClause(u8 battlerId)
+{
+    u8 side = GetBattlerSide(battlerId);
+
+    sSleepClauseMonPersonality[side] = gBattleMons[battlerId].personality;
+    sSleepClauseSet[side] = TRUE;
+}
+
+void ClearSleepClause(u8 battlerId)
+{
+    u8 side = GetBattlerSide(battlerId);
+
+    if (sSleepClauseSet[side] && sSleepClauseMonPersonality[side] == gBattleMons[battlerId].personality)
+        sSleepClauseSet[side] = FALSE;
+}
+
+void SetUpBattleRulesBench(void)
+{
+    s32 i;
+    bool32 hasLegalMon = FALSE;
+
+    sSleepClauseSet[B_SIDE_PLAYER] = FALSE;
+    sSleepClauseSet[B_SIDE_OPPONENT] = FALSE;
+    sBenchedMonCount = 0;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        if (GetMonData(&gPlayerParty[i], MON_DATA_HP) != 0
+         && GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE
+         && GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
+         && IsPlayerPartyMonLegal(i))
+            hasLegalMon = TRUE;
+    }
+
+    // With no legal Pokemon able to fight, the rules are waived rather than leaving the player stuck.
+    if (!hasLegalMon)
+        return;
+
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        if (!IsPlayerPartyMonLegal(i))
+            sBenchedMonPersonalities[sBenchedMonCount++] = GetMonData(&gPlayerParty[i], MON_DATA_PERSONALITY);
+    }
+}
+
+bool8 IsMonBenched(struct Pokemon *mon)
+{
+    u32 personality;
+    s32 i;
+
+    if (mon < &gPlayerParty[0] || mon >= &gPlayerParty[PARTY_SIZE])
+        return FALSE;
+
+    personality = GetMonData(mon, MON_DATA_PERSONALITY);
+    for (i = 0; i < sBenchedMonCount; i++)
+    {
+        if (sBenchedMonPersonalities[i] == personality)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 u8 TrySetCantSelectMoveBattleScript(void)
 {
     u8 holdEffect;
     u8 limitations = 0;
     u16 move = gBattleMons[gActiveBattler].moves[gBattleBufferB[gActiveBattler][2]];
     u16 *choicedMove = &gBattleStruct->choicedMove[gActiveBattler];
+
+    if (IsMoveBanned(move))
+    {
+        gCurrentMove = move;
+        gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingBannedMove;
+        limitations++;
+    }
 
     if (gDisableStructs[gActiveBattler].disabledMove == move && move != MOVE_NONE)
     {
@@ -375,6 +512,9 @@ u8 CheckMoveLimitations(u8 battlerId, u8 unusableMoves, u8 check)
     {
         // No move
         if (gBattleMons[battlerId].moves[i] == MOVE_NONE && check & MOVE_LIMITATION_ZEROMOVE)
+            unusableMoves |= gBitTable[i];
+        // Banned by the battle rules
+        if (IsMoveBanned(gBattleMons[battlerId].moves[i]))
             unusableMoves |= gBitTable[i];
         // No PP
         if (gBattleMons[battlerId].pp[i] == 0 && check & MOVE_LIMITATION_PP)
@@ -1035,8 +1175,10 @@ u8 DoBattlerEndTurnEffects(void)
                     gStatuses3[gActiveBattler] -= STATUS3_YAWN_TURN(1);
                     if (!(gStatuses3[gActiveBattler] & STATUS3_YAWN) && !(gBattleMons[gActiveBattler].status1 & STATUS1_ANY)
                      && gBattleMons[gActiveBattler].ability != ABILITY_VITAL_SPIRIT
-                     && gBattleMons[gActiveBattler].ability != ABILITY_INSOMNIA && !UproarWakeUpCheck(gActiveBattler))
+                     && gBattleMons[gActiveBattler].ability != ABILITY_INSOMNIA && !UproarWakeUpCheck(gActiveBattler)
+                     && !IsSleepClauseActive(gActiveBattler))
                     {
+                        SetSleepClause(gActiveBattler);
                         CancelMultiTurnMoves(gActiveBattler);
                         gBattleMons[gActiveBattler].status1 |= STATUS1_SLEEP_TURN((Random() & 3) + 2); // 2-5 turns of sleep
                         BtlController_EmitSetMonData(BUFFER_A, REQUEST_STATUS_BATTLE, 0, 4, &gBattleMons[gActiveBattler].status1);
@@ -1561,7 +1703,8 @@ bool8 HasNoMonsToSwitch(u8 battler, u8 partyIdBattlerOn1, u8 partyIdBattlerOn2)
         {
             if (GetMonData(&party[i], MON_DATA_HP) != 0
              && GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE
-             && GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG)
+             && GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
+             && !IsMonBenched(&party[i]))
                 break;
         }
         return (i == playerId * MULTI_PARTY_SIZE + MULTI_PARTY_SIZE);
@@ -1591,6 +1734,7 @@ bool8 HasNoMonsToSwitch(u8 battler, u8 partyIdBattlerOn1, u8 partyIdBattlerOn2)
             if (GetMonData(&party[i], MON_DATA_HP) != 0
              && GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE
              && GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
+             && !IsMonBenched(&party[i])
              && i != partyIdBattlerOn1 && i != partyIdBattlerOn2
              && i != *(gBattleStruct->monToSwitchIntoId + flankId) && i != playerId[gBattleStruct->monToSwitchIntoId])
                 break;

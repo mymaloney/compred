@@ -312,6 +312,12 @@ BattleScript_WasntAffected::
 	waitmessage B_WAIT_TIME_LONG
 	goto BattleScript_MoveEnd
 
+BattleScript_SleepClausePrevents::
+	pause B_WAIT_TIME_SHORT
+	printstring STRINGID_SLEEPCLAUSE
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_MoveEnd
+
 BattleScript_CantMakeAsleep::
 	pause B_WAIT_TIME_SHORT
 	printfromtable gUproarAwakeStringIds
@@ -2922,6 +2928,11 @@ BattleScript_PayDayMoneyAndPickUpItems::
 	pickup
 	end2
 
+BattleScript_EndlessBattleDraw::
+	printstring STRINGID_ENDLESSBATTLE
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_LocalBattleLost
+
 BattleScript_LocalBattleLost::
 	jumpifbattletype BATTLE_TYPE_TRAINER_TOWER, BattleScript_BattleTowerLost
 	jumpifbattletype BATTLE_TYPE_EREADER_TRAINER, BattleScript_EReaderOrSecretBaseTrainerEnd
@@ -3594,6 +3605,10 @@ BattleScript_MoveUsedIsImprisoned::
 	printstring STRINGID_PKMNCANTUSEMOVESEALED
 	waitmessage B_WAIT_TIME_LONG
 	goto BattleScript_MoveEnd
+
+BattleScript_SelectingBannedMove::
+	printselectionstring STRINGID_MOVEISBANNED
+	endselectionscript
 
 BattleScript_SelectingImprisonedMove::
 	printselectionstring STRINGID_PKMNCANTUSEMOVESEALED

@@ -130,6 +130,9 @@ EWRAM_DATA u8 gBattleTextBuff3[TEXT_BUFF_ARRAY_COUNT] = {0};
 // is removed (and none of the buffers above are increased in size)
 // it will instead overflow into useful data.
 static EWRAM_DATA u32 sFlickerArray[25] = {0};
+// Endless Battle Clause: battles that reach this many turns end in a draw
+#define ENDLESS_BATTLE_TURN_LIMIT 1000
+static EWRAM_DATA u16 sEndlessBattleTurnCount = 0;
 EWRAM_DATA u32 gBattleTypeFlags = 0;
 EWRAM_DATA u8 gBattleTerrain = 0;
 EWRAM_DATA u32 gUnusedFirstBattleVar1 = 0;
@@ -2317,6 +2320,7 @@ static void BattleStartClearSetData(void)
     for (i = 0; i < 11; i++)
         gBattleResults.catchAttempts[i] = 0;
     gBattleResults.battleTurnCounter = 0;
+    sEndlessBattleTurnCount = 0;
     gBattleResults.playerFaintCounter = 0;
     gBattleResults.opponentFaintCounter = 0;
     gBattleResults.playerSwitchesCounter = 0;
@@ -2991,6 +2995,8 @@ void BattleTurnPassed(void)
     gMoveResultFlags = 0;
     for (i = 0; i < 5; i++)
         gBattleCommunication[i] = 0;
+    if (gBattleOutcome == 0 && ++sEndlessBattleTurnCount >= ENDLESS_BATTLE_TURN_LIMIT)
+        gBattleOutcome = B_OUTCOME_DREW;
     if (gBattleOutcome != 0)
     {
         gCurrentActionFuncId = B_ACTION_FINISHED;
@@ -3622,8 +3628,17 @@ static void SetActionsAndBattlersTurnOrder(void)
                      && gActionsByTurnOrder[j] != B_ACTION_USE_ITEM
                      && gActionsByTurnOrder[i] != B_ACTION_SWITCH
                      && gActionsByTurnOrder[j] != B_ACTION_SWITCH)
+                    {
                         if (GetWhoStrikesFirst(battler1, battler2, FALSE))
                             SwapTurnOrder(i, j);
+                    }
+                    // Switch Priority Clause: faster Pokemon switch out first
+                    else if (gActionsByTurnOrder[i] == B_ACTION_SWITCH
+                          && gActionsByTurnOrder[j] == B_ACTION_SWITCH)
+                    {
+                        if (GetWhoStrikesFirst(battler1, battler2, TRUE))
+                            SwapTurnOrder(i, j);
+                    }
                 }
             }
         }
@@ -3802,7 +3817,10 @@ static void HandleEndTurn_BattleLost(void)
         {
             gBattleCommunication[MULTISTRING_CHOOSER] = 0;
         }
-        gBattlescriptCurrInstr = BattleScript_LocalBattleLost;
+        if (gBattleOutcome == B_OUTCOME_DREW && sEndlessBattleTurnCount >= ENDLESS_BATTLE_TURN_LIMIT)
+            gBattlescriptCurrInstr = BattleScript_EndlessBattleDraw;
+        else
+            gBattlescriptCurrInstr = BattleScript_LocalBattleLost;
     }
     gBattleMainFunc = HandleEndTurn_FinishBattle;
 }

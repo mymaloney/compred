@@ -725,6 +725,16 @@ static const u16 sMovesForbiddenToCopy[] =
     MOVE_COVET,
     MOVE_TRICK,
     MOVE_FOCUS_PUNCH,
+    MOVE_FISSURE,
+    MOVE_HORN_DRILL,
+    MOVE_GUILLOTINE,
+    MOVE_SHEER_COLD,
+    MOVE_MINIMIZE,
+    MOVE_DOUBLE_TEAM,
+    MOVE_BATON_PASS,
+    MOVE_EXPLOSION,
+    MOVE_SELF_DESTRUCT,
+    MOVE_SWAGGER,
     METRONOME_FORBIDDEN_END
 };
 
@@ -2169,7 +2179,10 @@ void SetMoveEffect(bool8 primary, u8 certain)
                 break;
             if (gBattleMons[gEffectBattler].ability == ABILITY_INSOMNIA)
                 break;
+            if (IsSleepClauseActive(gEffectBattler))
+                break;
 
+            SetSleepClause(gEffectBattler);
             CancelMultiTurnMoves(gEffectBattler);
             statusChanged = TRUE;
             break;
@@ -3392,7 +3405,8 @@ static void Cmd_checkteamslost(void)
 
     for (i = 0; i < PARTY_SIZE; i++)
     {
-        if (GetMonData(&gPlayerParty[i], MON_DATA_SPECIES) && !GetMonData(&gPlayerParty[i], MON_DATA_IS_EGG))
+        if (GetMonData(&gPlayerParty[i], MON_DATA_SPECIES) && !GetMonData(&gPlayerParty[i], MON_DATA_IS_EGG)
+         && !IsMonBenched(&gPlayerParty[i]))
         {
             HP_count += GetMonData(&gPlayerParty[i], MON_DATA_HP);
         }
@@ -4561,6 +4575,7 @@ static void Cmd_jumpifcantswitch(void)
             if (GetMonData(&party[i], MON_DATA_SPECIES) != SPECIES_NONE
              && !GetMonData(&party[i], MON_DATA_IS_EGG)
              && GetMonData(&party[i], MON_DATA_HP) != 0
+             && !IsMonBenched(&party[i])
              && gBattlerPartyIndexes[gActiveBattler] != i)
                 break;
         }
@@ -4602,6 +4617,7 @@ static void Cmd_jumpifcantswitch(void)
             if (GetMonData(&party[i], MON_DATA_HP) != 0
              && GetMonData(&party[i], MON_DATA_SPECIES) != SPECIES_NONE
              && !GetMonData(&party[i], MON_DATA_IS_EGG)
+             && !IsMonBenched(&party[i])
              && i != gBattlerPartyIndexes[battlerIn1] && i != gBattlerPartyIndexes[battlerIn2])
                 break;
         }
@@ -6495,6 +6511,7 @@ static void Cmd_trysetrest(void)
             gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_REST;
 
         gBattleMons[gBattlerTarget].status1 = STATUS1_SLEEP_TURN(3);
+        ClearSleepClause(gBattlerTarget);
         BtlController_EmitSetMonData(BUFFER_A, REQUEST_STATUS_BATTLE, 0, sizeof(gBattleMons[gActiveBattler].status1), &gBattleMons[gActiveBattler].status1);
         MarkBattlerForControllerExec(gActiveBattler);
         gBattlescriptCurrInstr += 5;
@@ -6558,6 +6575,10 @@ static void Cmd_jumpifcantmakeasleep(void)
         gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_STAYED_AWAKE_USING;
         gBattlescriptCurrInstr = jumpPtr;
         RecordAbilityBattle(gBattlerTarget, gLastUsedAbility);
+    }
+    else if (IsSleepClauseActive(gBattlerTarget))
+    {
+        gBattlescriptCurrInstr = BattleScript_SleepClausePrevents;
     }
     else
     {
@@ -6900,7 +6921,7 @@ static bool8 TryDoForceSwitchOut(void)
     return TRUE;
 }
 
-#define MON_CAN_BATTLE(mon) (((GetMonData(mon, MON_DATA_SPECIES) && GetMonData(mon, MON_DATA_IS_EGG) != TRUE && GetMonData(mon, MON_DATA_HP))))
+#define MON_CAN_BATTLE(mon) (((GetMonData(mon, MON_DATA_SPECIES) && GetMonData(mon, MON_DATA_IS_EGG) != TRUE && GetMonData(mon, MON_DATA_HP) && !IsMonBenched(mon))))
 
 static void Cmd_forcerandomswitch(void)
 {
@@ -6926,7 +6947,8 @@ static void Cmd_forcerandomswitch(void)
             {
                 if (GetMonData(&party[i], MON_DATA_SPECIES) != SPECIES_NONE
                  && !GetMonData(&party[i], MON_DATA_IS_EGG)
-                 && GetMonData(&party[i], MON_DATA_HP) != 0)
+                 && GetMonData(&party[i], MON_DATA_HP) != 0
+                 && !IsMonBenched(&party[i]))
                     ++valid;
             }
         }
@@ -6937,7 +6959,8 @@ static void Cmd_forcerandomswitch(void)
             {
                 if (GetMonData(&party[i], MON_DATA_SPECIES) != SPECIES_NONE
                  && !GetMonData(&party[i], MON_DATA_IS_EGG)
-                 && GetMonData(&party[i], MON_DATA_HP) != 0)
+                 && GetMonData(&party[i], MON_DATA_HP) != 0
+                 && !IsMonBenched(&party[i]))
                     ++valid;
             }
         }

@@ -207,7 +207,7 @@ SafariZone_North_EventScript_ItemTM47::
 	end
 
 SafariZone_West_EventScript_ItemTM32::
-	finditem ITEM_TM32
+	finditem ITEM_PP_UP
 	end
 
 SafariZone_West_EventScript_ItemGoldTeeth::
@@ -495,7 +495,7 @@ RocketHideout_B3F_EventScript_ItemBlackGlasses::
 	end
 
 SafariZone_North_EventScript_ItemQuickClaw::
-	finditem ITEM_QUICK_CLAW
+	finditem ITEM_SCOPE_LENS
 	end
 
 SeafoamIslands_1F_EventScript_ItemIceHeal::
@@ -647,7 +647,7 @@ FiveIsland_LostCave_Room10_EventScript_ItemSilkScarf::
 	end
 
 FiveIsland_LostCave_Room11_EventScript_ItemLaxIncense::
-	finditem ITEM_LAX_INCENSE
+	finditem ITEM_SHELL_BELL
 	end
 
 FiveIsland_LostCave_Room12_EventScript_ItemSeaIncense::

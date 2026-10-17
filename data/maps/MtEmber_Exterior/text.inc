@@ -1,3 +1,9 @@
+Text_ExplosionBanned::
+    .string "I used to teach EXPLOSION, but\n"
+    .string "it's been banned from battles.\p"
+    .string "Just as well. An eruption here\n"
+    .string "would be the end of us all!$"
+
 Text_ExplosionTeach::
     .string "Can you imagine?\n"
     .string "If this volcano were to erupt?\p"

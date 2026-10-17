@@ -385,6 +385,7 @@ extern const u8 gText_MailTransferredFromMailbox[];
 extern const u8 gText_RemoveMailBeforeItem[];
 extern const u8 gText_CantSwitchWithAlly[];
 extern const u8 gText_PkmnHasNoEnergy[];
+extern const u8 gText_PkmnBannedByRules[];
 extern const u8 gText_PkmnAlreadyInBattle[];
 extern const u8 gText_EggCantBattle[];
 extern const u8 gText_PkmnAlreadySelected[];

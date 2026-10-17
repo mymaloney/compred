@@ -545,6 +545,10 @@ u8 CreateBattlerHealthboxSprites(u8 battlerId)
     u8 healthbarSpriteId;
     struct Sprite *healthbarSprite;
 
+    // HP Percentage Mod: opponents' healthboxes always show their HP as a percentage
+    if (GetBattlerSide(battlerId) == B_SIDE_OPPONENT && !(gBattleTypeFlags & BATTLE_TYPE_SAFARI))
+        gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars = TRUE;
+
     if (!IsDoubleBattle())
     {
         if (GetBattlerSide(battlerId) == B_SIDE_PLAYER)
@@ -923,6 +927,21 @@ static void UpdateHpTextInHealthboxInDoubles(u8 healthboxSpriteId, s16 value, u8
             }
         }
     }
+}
+
+// HP Percentage Mod: opponents' HP text is shown as a percentage, e.g. " 45/100".
+static void UpdateOpponentHpPercentText(u8 healthboxSpriteId, s32 hp, s32 maxHp)
+{
+    s32 percent = 0;
+
+    if (maxHp > 0 && hp > 0)
+    {
+        percent = (hp * 100) / maxHp;
+        if (percent == 0)
+            percent = 1;
+    }
+    UpdateHpTextInHealthboxInDoubles(healthboxSpriteId, percent, HP_CURRENT);
+    UpdateHpTextInHealthboxInDoubles(healthboxSpriteId, 100, HP_MAX);
 }
 
 // Prints mon's nature, catch and flee rate. Probably used to test pokeblock-related features.
@@ -1880,6 +1899,21 @@ s32 MoveBattleBar(u8 battlerId, u8 healthboxSpriteId, u8 whichBar, u8 unused)
 
     if (whichBar == EXP_BAR || (whichBar == HEALTH_BAR && !gBattleSpritesDataPtr->battlerData[battlerId].hpNumbersNoBars))
         MoveBattleBarGraphically(battlerId, whichBar);
+    else if (GetBattlerSide(battlerId) == B_SIDE_OPPONENT && !(gBattleTypeFlags & BATTLE_TYPE_SAFARI))
+    {
+        s32 maxHp = gBattleSpritesDataPtr->battleBars[battlerId].maxValue;
+        s32 hp = currentBarValue;
+
+        if (hp == -1)
+        {
+            hp = gBattleSpritesDataPtr->battleBars[battlerId].oldValue - gBattleSpritesDataPtr->battleBars[battlerId].receivedValue;
+            if (hp < 0)
+                hp = 0;
+            if (hp > maxHp)
+                hp = maxHp;
+        }
+        UpdateOpponentHpPercentText(healthboxSpriteId, hp, maxHp);
+    }
 
     if (currentBarValue == -1)
         gBattleSpritesDataPtr->battleBars[battlerId].currValue = 0;

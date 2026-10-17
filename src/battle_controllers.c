@@ -291,6 +291,8 @@ static void SetBattlePartyIds(void)
 {
     s32 i, j;
 
+    SetUpBattleRulesBench();
+
     if (!(gBattleTypeFlags & BATTLE_TYPE_MULTI))
     {
         for (i = 0; i < gBattlersCount; i++)
@@ -304,7 +306,8 @@ static void SetBattlePartyIds(void)
                         if (GetMonData(&gPlayerParty[j], MON_DATA_HP) != 0
                          && GetMonData(&gPlayerParty[j], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE
                          && GetMonData(&gPlayerParty[j], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
-                         && !GetMonData(&gPlayerParty[j], MON_DATA_IS_EGG))
+                         && !GetMonData(&gPlayerParty[j], MON_DATA_IS_EGG)
+                         && !IsMonBenched(&gPlayerParty[j]))
                         {
                             gBattlerPartyIndexes[i] = j;
                             break;
@@ -330,6 +333,7 @@ static void SetBattlePartyIds(void)
                          && GetMonData(&gPlayerParty[j], MON_DATA_SPECIES) != SPECIES_NONE  // Probably a typo by Game Freak. The rest use SPECIES2.
                          && GetMonData(&gPlayerParty[j], MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
                          && !GetMonData(&gPlayerParty[j], MON_DATA_IS_EGG)
+                         && !IsMonBenched(&gPlayerParty[j])
                          && gBattlerPartyIndexes[i - 2] != j)
                         {
                             gBattlerPartyIndexes[i] = j;

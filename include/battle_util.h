@@ -73,6 +73,14 @@ void UpdateSentPokesToOpponentValue(u8 battler);
 void BattleScriptPush(const u8 *bsPtr);
 void BattleScriptPushCursor(void);
 void BattleScriptPop(void);
+struct Pokemon;
+
+bool8 IsMoveBanned(u16 move);
+void SetUpBattleRulesBench(void);
+bool8 IsMonBenched(struct Pokemon *mon);
+bool8 IsSleepClauseActive(u8 battlerId);
+void SetSleepClause(u8 battlerId);
+void ClearSleepClause(u8 battlerId);
 u8 TrySetCantSelectMoveBattleScript(void);
 u8 CheckMoveLimitations(u8 battlerId, u8 unusableMoves, u8 check);
 bool8 AreAllMovesUnusable(void);

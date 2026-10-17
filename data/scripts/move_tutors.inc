@@ -76,20 +76,9 @@ EventScript_RockSlideTaught::
 	release
 	end
 
+@ EXPLOSION is banned, so this tutor no longer teaches it
 MtEmber_Exterior_EventScript_ExplosionTutor::
-	lock
-	faceplayer
-	goto_if_set FLAG_TUTOR_EXPLOSION, EventScript_ExplosionTaught
-	msgbox Text_ExplosionTeach, MSGBOX_YESNO
-	goto_if_eq VAR_RESULT, NO, EventScript_ExplosionDeclined
-	call EventScript_CanOnlyBeLearnedOnce
-	goto_if_eq VAR_RESULT, NO, EventScript_ExplosionDeclined
-	msgbox Text_ExplosionWhichMon
-	setvar VAR_0x8005, MOVETUTOR_EXPLOSION
-	call EventScript_ChooseMoveTutorMon
-	goto_if_eq VAR_RESULT, FALSE, EventScript_ExplosionDeclined
-	setflag FLAG_TUTOR_EXPLOSION
-	goto EventScript_ExplosionTaught
+	msgbox Text_ExplosionBanned, MSGBOX_NPC
 	end
 
 EventScript_ExplosionDeclined::

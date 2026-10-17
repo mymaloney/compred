@@ -19,6 +19,7 @@
 #include "link.h"
 #include "m4a.h"
 #include "pokedex.h"
+#include "string_util.h"
 #include "strings.h"
 #include "overworld.h"
 #include "party_menu.h"
@@ -3769,6 +3770,64 @@ u8 CalculateEnemyPartyCount(void)
     return gEnemyPartyCount;
 }
 
+static const u16 sUberSpecies[] =
+{
+    SPECIES_MEWTWO,
+    SPECIES_MEW,
+    SPECIES_LUGIA,
+    SPECIES_HO_OH,
+    SPECIES_KYOGRE,
+    SPECIES_GROUDON,
+    SPECIES_RAYQUAZA,
+    SPECIES_DEOXYS,
+    SPECIES_LATIAS,
+    SPECIES_LATIOS,
+    SPECIES_WOBBUFFET,
+    SPECIES_WYNAUT,
+};
+
+bool8 IsSpeciesUber(u16 species)
+{
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sUberSpecies); i++)
+    {
+        if (sUberSpecies[i] == species)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// Battle rules: Ubers are banned, and only the first Pokemon of each species (Species Clause)
+// and of each nickname (Nickname Clause) in party order may battle.
+bool8 IsPlayerPartyMonLegal(u8 partyIndex)
+{
+    u8 name[POKEMON_NAME_LENGTH + 1];
+    u8 otherName[POKEMON_NAME_LENGTH + 1];
+    u16 species = GetMonData(&gPlayerParty[partyIndex], MON_DATA_SPECIES_OR_EGG, NULL);
+    s32 i;
+
+    if (species == SPECIES_NONE || species == SPECIES_EGG)
+        return TRUE;
+    if (IsSpeciesUber(species))
+        return FALSE;
+
+    GetMonData(&gPlayerParty[partyIndex], MON_DATA_NICKNAME, name);
+    for (i = 0; i < partyIndex; i++)
+    {
+        u16 otherSpecies = GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG, NULL);
+
+        if (otherSpecies == SPECIES_NONE || otherSpecies == SPECIES_EGG)
+            continue;
+        if (otherSpecies == species)
+            return FALSE;
+        GetMonData(&gPlayerParty[i], MON_DATA_NICKNAME, otherName);
+        if (StringCompare(name, otherName) == 0)
+            return FALSE;
+    }
+    return TRUE;
+}
+
 u8 GetMonsStateToDoubles(void)
 {
     s32 aliveCount = 0;
@@ -3784,7 +3843,8 @@ u8 GetMonsStateToDoubles(void)
         // because of the requirement of all 3 of these checks.
         if (GetMonData(&gPlayerParty[i], MON_DATA_HP, NULL) != 0
          && GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG, NULL) != SPECIES_NONE
-         && GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG, NULL) != SPECIES_EGG)
+         && GetMonData(&gPlayerParty[i], MON_DATA_SPECIES_OR_EGG, NULL) != SPECIES_EGG
+         && IsPlayerPartyMonLegal(i))
             aliveCount++;
     }
 

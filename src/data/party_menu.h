@@ -629,7 +629,7 @@ static const u8 *const sActionStringTable[] =
     [PARTY_MSG_BOOST_PP_WHICH_MOVE]    = gText_BoostPp,
     [PARTY_MSG_DO_WHAT_WITH_ITEM]      = gText_DoWhatWithItem,
     [PARTY_MSG_DO_WHAT_WITH_MAIL]      = gText_DoWhatWithMail,
-    [PARTY_MSG_CHANGE_IVS]             = gText_ChangeIVs,
+    [PARTY_MSG_CHANGE_EVS]             = gText_ChangeEVs,
     [PARTY_MSG_CHOOSE_NATURE]          = gText_ChooseNature,
 };
 
@@ -1054,7 +1054,7 @@ enum
     CURSOR_OPTION_TRAIN,
     CURSOR_OPTION_MOVES,
     CURSOR_OPTION_EVOLVE,
-    CURSOR_OPTION_IVS,
+    CURSOR_OPTION_EVS,
     CURSOR_OPTION_NATURE,
     CURSOR_OPTION_ABILITY,
     CURSOR_OPTION_CANCEL_TRAIN,
@@ -1090,7 +1090,7 @@ static struct
     [CURSOR_OPTION_TRAIN]                                = {gText_PartyMenuTrain,         CursorCB_Train    },
     [CURSOR_OPTION_MOVES]                                = {gText_PartyMenuMoves,         CursorCB_Moves    },
     [CURSOR_OPTION_EVOLVE]                               = {gText_PartyMenuEvolve,        CursorCB_Evolve   },
-    [CURSOR_OPTION_IVS]                                  = {gText_PartyMenuIVs,           CursorCB_IVs      },
+    [CURSOR_OPTION_EVS]                                  = {gText_PartyMenuEVs,           CursorCB_EVs      },
     [CURSOR_OPTION_NATURE]                               = {gText_PartyMenuNature,        CursorCB_Nature   },
     [CURSOR_OPTION_ABILITY]                              = {gText_PartyMenuAbility,       CursorCB_Ability  },
     [CURSOR_OPTION_CANCEL_TRAIN]                         = {gFameCheckerText_Cancel,      CursorCB_Cancel2  },

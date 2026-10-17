@@ -216,8 +216,9 @@
 
 // Every Pokemon the player obtains and every trainer's Pokemon is set to this level
 #define STANDARD_MON_LEVEL       50
-// Every Pokemon's stats are calculated as if it had this many EVs in each stat
-#define PERFECT_EVS              252
+// EV limits enforced by the party menu's EV editor (the Gen 4+ caps)
+#define EV_CAP_PER_STAT          252
+#define EV_CAP_TOTAL             510
 #define MAX_RELEARNER_MOVES      200
 
 #define MON_MALE       0x00

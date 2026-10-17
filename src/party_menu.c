@@ -152,7 +152,7 @@ static void CursorCB_Moves(u8 taskId);
 static void CursorCB_Train(u8 taskId);
 static void CursorCB_Evolve(u8 taskId);
 static void CursorCB_EvolveTarget(u8 taskId);
-static void CursorCB_IVs(u8 taskId);
+static void CursorCB_EVs(u8 taskId);
 static void CursorCB_Nature(u8 taskId);
 static void CursorCB_Ability(u8 taskId);
 static void CursorCB_Switch(u8 taskId);
@@ -2491,7 +2491,7 @@ void DisplayPartyMenuStdMessage(u32 stringId)
         switch (stringId)
         {
         case PARTY_MSG_DO_WHAT_WITH_MON:
-        case PARTY_MSG_CHANGE_IVS:
+        case PARTY_MSG_CHANGE_EVS:
         case PARTY_MSG_CHOOSE_NATURE:
             *windowPtr = AddWindow(&sDoWhatWithMonMsgWindowTemplate);
             break;
@@ -3164,7 +3164,7 @@ static void CursorCB_Moves(u8 taskId)
 }
 
 // ---------------------------------------------------------------------------
-// TRAIN submenu: relearn moves, evolve, and change IVs, nature and ability for free
+// TRAIN submenu: relearn moves, evolve, and change EVs, nature and ability for free
 // ---------------------------------------------------------------------------
 
 #define tEditorCursor data[1]
@@ -3172,24 +3172,24 @@ static void CursorCB_Moves(u8 taskId)
 
 static EWRAM_DATA u16 sPartyEvolutionTarget = 0;
 
-static const u8 sText_IvHp[] = _("HP");
-static const u8 sText_IvAttack[] = _("ATTACK");
-static const u8 sText_IvDefense[] = _("DEFENSE");
-static const u8 sText_IvSpAtk[] = _("SP. ATK");
-static const u8 sText_IvSpDef[] = _("SP. DEF");
-static const u8 sText_IvSpeed[] = _("SPEED");
+static const u8 sText_StatHp[] = _("HP");
+static const u8 sText_StatAttack[] = _("ATTACK");
+static const u8 sText_StatDefense[] = _("DEFENSE");
+static const u8 sText_StatSpAtk[] = _("SP. ATK");
+static const u8 sText_StatSpDef[] = _("SP. DEF");
+static const u8 sText_StatSpeed[] = _("SPEED");
 static const u8 sText_NatureNeutral[] = _("NEUTRAL");
 static const u8 sText_NaturePlus[] = _("+");
 static const u8 sText_NatureMinus[] = _(" -");
 
-static const u8 *const sIvStatNames[NUM_STATS] =
+static const u8 *const sEvStatNames[NUM_STATS] =
 {
-    sText_IvHp, sText_IvAttack, sText_IvDefense, sText_IvSpAtk, sText_IvSpDef, sText_IvSpeed,
+    sText_StatHp, sText_StatAttack, sText_StatDefense, sText_StatSpAtk, sText_StatSpDef, sText_StatSpeed,
 };
 
-static const u8 sIvStatData[NUM_STATS] =
+static const u8 sEvStatData[NUM_STATS] =
 {
-    MON_DATA_HP_IV, MON_DATA_ATK_IV, MON_DATA_DEF_IV, MON_DATA_SPATK_IV, MON_DATA_SPDEF_IV, MON_DATA_SPEED_IV,
+    MON_DATA_HP_EV, MON_DATA_ATK_EV, MON_DATA_DEF_EV, MON_DATA_SPATK_EV, MON_DATA_SPDEF_EV, MON_DATA_SPEED_EV,
 };
 
 // Short stat names in sNatureStatTable order: Attack, Defense, Speed, Sp. Atk, Sp. Def
@@ -3222,7 +3222,7 @@ static void ShowTrainSelectionWindow(u8 taskId)
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_MOVES);
     if (GetMonEvolutionTargets(GetMonData(mon, MON_DATA_SPECIES), targets) != 0)
         AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_EVOLVE);
-    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_IVS);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_EVS);
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_NATURE);
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_ABILITY);
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_CANCEL_TRAIN);
@@ -3310,25 +3310,56 @@ static void PrintTrainEditorText(u8 windowId, const u8 *text, u8 x, u8 row)
     AddTextPrinterParameterized4(windowId, FONT_NORMAL, x, row * 16 + 2, GetFontAttribute(FONT_NORMAL, FONTATTR_LETTER_SPACING), 0, sFontColorTable[3], 0, text);
 }
 
-static void DrawIVEditor(u8 cursorPos)
+static u16 GetMonTotalEVs(struct Pokemon *mon)
+{
+    u16 total = 0;
+    u8 i;
+
+    for (i = 0; i < NUM_STATS; i++)
+        total += GetMonData(mon, sEvStatData[i]);
+    return total;
+}
+
+static void DrawEVEditor(u8 cursorPos)
 {
     struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
     u8 windowId = sPartyMenuInternal->windowId[0];
     u8 cursorWidth = GetMenuCursorDimensionByFont(FONT_NORMAL, 0);
+    u16 total = GetMonTotalEVs(mon);
     u8 i;
 
     FillWindowPixelBuffer(windowId, PIXEL_FILL(TEXT_COLOR_WHITE));
     for (i = 0; i < NUM_STATS; i++)
     {
-        PrintTrainEditorText(windowId, sIvStatNames[i], cursorWidth, i);
-        ConvertIntToDecimalStringN(gStringVar1, GetMonData(mon, sIvStatData[i]), STR_CONV_MODE_RIGHT_ALIGN, 2);
-        PrintTrainEditorText(windowId, gStringVar1, 62, i);
+        PrintTrainEditorText(windowId, sEvStatNames[i], cursorWidth, i);
+        ConvertIntToDecimalStringN(gStringVar1, GetMonData(mon, sEvStatData[i]), STR_CONV_MODE_RIGHT_ALIGN, 3);
+        PrintTrainEditorText(windowId, gStringVar1, 56, i);
     }
+    PrintTrainEditorText(windowId, gText_EVsLeft, cursorWidth, NUM_STATS);
+    ConvertIntToDecimalStringN(gStringVar1, total < EV_CAP_TOTAL ? EV_CAP_TOTAL - total : 0, STR_CONV_MODE_RIGHT_ALIGN, 3);
+    PrintTrainEditorText(windowId, gStringVar1, 56, NUM_STATS);
     Menu_InitCursorInternal(windowId, FONT_NORMAL, 0, 2, 16, NUM_STATS, cursorPos, TRUE);
     CopyWindowToVram(windowId, COPYWIN_FULL);
 }
 
-static void Task_HandleIVEditorInput(u8 taskId)
+// Sets one EV, keeping it within EV_CAP_PER_STAT and the total within EV_CAP_TOTAL
+static void SetMonEVWithinCaps(struct Pokemon *mon, u8 stat, s32 value)
+{
+    s32 others = GetMonTotalEVs(mon) - GetMonData(mon, sEvStatData[stat]);
+    u8 ev;
+
+    if (value > EV_CAP_PER_STAT)
+        value = EV_CAP_PER_STAT;
+    if (value > EV_CAP_TOTAL - others)
+        value = EV_CAP_TOTAL - others;
+    if (value < 0)
+        value = 0;
+    ev = value;
+    SetMonData(mon, sEvStatData[stat], &ev);
+}
+
+// LEFT/RIGHT change the EV by 4 (the amount that adds a stat point), START maxes it, SELECT clears it
+static void Task_HandleEVEditorInput(u8 taskId)
 {
     s16 *data = gTasks[taskId].data;
     struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
@@ -3346,29 +3377,21 @@ static void Task_HandleIVEditorInput(u8 taskId)
         PlaySE(SE_SELECT);
         tEditorCursor = Menu_MoveCursor(1);
     }
-    else if (JOY_REPT(DPAD_LEFT | DPAD_RIGHT) || JOY_NEW(START_BUTTON))
+    else if (JOY_REPT(DPAD_LEFT | DPAD_RIGHT) || JOY_NEW(START_BUTTON | SELECT_BUTTON))
     {
-        u8 i;
+        s32 ev = GetMonData(mon, sEvStatData[tEditorCursor]);
 
         if (JOY_NEW(START_BUTTON))
-        {
-            u8 maxIV = MAX_PER_STAT_IVS;
-
-            for (i = 0; i < NUM_STATS; i++)
-                SetMonData(mon, sIvStatData[i], &maxIV);
-        }
+            ev = EV_CAP_PER_STAT;
+        else if (JOY_NEW(SELECT_BUTTON))
+            ev = 0;
+        else if (JOY_REPT(DPAD_LEFT))
+            ev = ((ev - 1) / 4) * 4; // Down to the previous multiple of 4
         else
-        {
-            u8 iv = GetMonData(mon, sIvStatData[tEditorCursor]);
-
-            if (JOY_REPT(DPAD_LEFT))
-                iv = (iv == 0) ? MAX_PER_STAT_IVS : iv - 1;
-            else
-                iv = (iv == MAX_PER_STAT_IVS) ? 0 : iv + 1;
-            SetMonData(mon, sIvStatData[tEditorCursor], &iv);
-        }
+            ev = (ev / 4) * 4 + 4;   // Up to the next multiple of 4
+        SetMonEVWithinCaps(mon, tEditorCursor, ev);
         PlaySE(SE_SELECT);
-        DrawIVEditor(tEditorCursor);
+        DrawEVEditor(tEditorCursor);
     }
     else if (JOY_NEW(A_BUTTON | B_BUTTON))
     {
@@ -3379,14 +3402,14 @@ static void Task_HandleIVEditorInput(u8 taskId)
     }
 }
 
-static void CursorCB_IVs(u8 taskId)
+static void CursorCB_EVs(u8 taskId)
 {
     PlaySE(SE_SELECT);
-    AddTrainEditorWindow(NUM_STATS);
+    AddTrainEditorWindow(NUM_STATS + 1);
     gTasks[taskId].tEditorCursor = 0;
-    DrawIVEditor(0);
-    DisplayPartyMenuStdMessage(PARTY_MSG_CHANGE_IVS);
-    gTasks[taskId].func = Task_HandleIVEditorInput;
+    DrawEVEditor(0);
+    DisplayPartyMenuStdMessage(PARTY_MSG_CHANGE_EVS);
+    gTasks[taskId].func = Task_HandleEVEditorInput;
 }
 
 static void DrawNaturePicker(u8 nature)
@@ -5404,10 +5427,8 @@ void ItemUseCB_RareCandy(u8 taskId, TaskFunc func)
     u16 item = gSpecialVar_ItemId;
     bool8 noEffect;
 
-    if (GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL)
-        noEffect = PokemonItemUseNoEffect(mon, item, gPartyMenu.slotId, 0);
-    else
-        noEffect = TRUE;
+    // Rare Candy is disabled: Pokemon stay at STANDARD_MON_LEVEL
+    noEffect = TRUE;
     PlaySE(SE_SELECT);
     if (noEffect)
     {

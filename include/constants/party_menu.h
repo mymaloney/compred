@@ -109,7 +109,7 @@
 #define PARTY_MSG_BOOST_PP_WHICH_MOVE       24
 #define PARTY_MSG_DO_WHAT_WITH_ITEM         25
 #define PARTY_MSG_DO_WHAT_WITH_MAIL         26
-#define PARTY_MSG_CHANGE_IVS                27
+#define PARTY_MSG_CHANGE_EVS                27
 #define PARTY_MSG_CHOOSE_NATURE             28
 #define PARTY_MSG_NONE                      127
 

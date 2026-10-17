@@ -1395,6 +1395,7 @@ static const s8 sNatureStatTable[NUM_NATURES][NUM_NATURE_STATS] =
 #include "data/pokemon/level_up_learnsets.h"
 #include "data/pokemon/evolution.h"
 #include "data/pokemon/level_up_learnset_pointers.h"
+#include "data/pokemon/relearner_moves.h"
 
 static const s8 sPokeblockFlavorCompatibilityTable[NUM_NATURES * FLAVOR_COUNT] =
 {
@@ -5837,6 +5838,21 @@ u8 GetMoveRelearnerMoves(struct Pokemon *mon, u16 *moves)
         }
     }
 
+    if (gRelearnerExtraMoves[species] != NULL)
+    {
+        const u16 *extraMoves = gRelearnerExtraMoves[species];
+
+        for (i = 0; extraMoves[i] != MOVE_NONE && numMoves < MAX_RELEARNER_MOVES; i++)
+        {
+            for (j = 0; j < MAX_MON_MOVES && learnedMoves[j] != extraMoves[i]; j++)
+                ;
+            for (k = 0; k < numMoves && moves[k] != extraMoves[i]; k++)
+                ;
+            if (j == MAX_MON_MOVES && k == numMoves)
+                moves[numMoves++] = extraMoves[i];
+        }
+    }
+
     return numMoves;
 }
 
@@ -5853,45 +5869,12 @@ u8 GetLevelUpMovesBySpecies(u16 species, u16 *moves)
 
 u8 GetNumberOfRelearnableMoves(struct Pokemon *mon)
 {
-    u16 learnedMoves[MAX_MON_MOVES];
-    u16 moves[MAX_LEVEL_UP_MOVES];
-    u8 numMoves = 0;
-    u16 species = GetMonData(mon, MON_DATA_SPECIES_OR_EGG, NULL);
-    u8 level = GetMonData(mon, MON_DATA_LEVEL, NULL);
-    int i, j, k;
+    u16 moves[MAX_RELEARNER_MOVES];
 
-    if (species == SPECIES_EGG)
+    if (GetMonData(mon, MON_DATA_SPECIES_OR_EGG, NULL) == SPECIES_EGG)
         return 0;
 
-    for (i = 0; i < MAX_MON_MOVES; i++)
-        learnedMoves[i] = GetMonData(mon, MON_DATA_MOVE1 + i, NULL);
-
-    for (i = 0; i < MAX_LEVEL_UP_MOVES; i++)
-    {
-        u16 moveLevel;
-
-        if (gLevelUpLearnsets[species][i] == LEVEL_UP_END)
-            break;
-
-        moveLevel = gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_LV;
-
-        if (moveLevel <= (level << 9))
-        {
-            for (j = 0; j < MAX_MON_MOVES && learnedMoves[j] != (gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID); j++)
-                ;
-
-            if (j == MAX_MON_MOVES)
-            {
-                for (k = 0; k < numMoves && moves[k] != (gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID); k++)
-                    ;
-
-                if (k == numMoves)
-                    moves[numMoves++] = gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID;
-            }
-        }
-    }
-
-    return numMoves;
+    return GetMoveRelearnerMoves(mon, moves);
 }
 
 u16 SpeciesToPokedexNum(u16 species)

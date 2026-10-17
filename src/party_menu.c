@@ -150,6 +150,7 @@ static void BlitBitmapToPartyWindow_RightColumn(u8 windowId, u8 x, u8 y, u8 widt
 static void CursorCB_Summary(u8 taskId);
 static void CursorCB_Moves(u8 taskId);
 static void CursorCB_Train(u8 taskId);
+static void CursorCB_Recommended(u8 taskId);
 static void CursorCB_Evolve(u8 taskId);
 static void CursorCB_EvolveTarget(u8 taskId);
 static void CursorCB_EVs(u8 taskId);
@@ -3219,6 +3220,7 @@ static void ShowTrainSelectionWindow(u8 taskId)
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
     sPartyMenuInternal->numActions = 0;
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_RECOMMENDED);
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_MOVES);
     if (GetMonEvolutionTargets(GetMonData(mon, MON_DATA_SPECIES), targets) != 0)
         AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_EVOLVE);
@@ -3488,6 +3490,76 @@ static void CursorCB_Nature(u8 taskId)
     DrawNaturePicker(gTasks[taskId].tEditorNature);
     DisplayPartyMenuStdMessage(PARTY_MSG_CHOOSE_NATURE);
     gTasks[taskId].func = Task_HandleNaturePickerInput;
+}
+
+#include "data/pokemon/recommended_builds.h"
+
+static void ApplyRecommendedBuild(struct Pokemon *mon)
+{
+    const struct RecommendedBuild *build = &sRecommendedBuilds[GetMonData(mon, MON_DATA_SPECIES)];
+    u8 i;
+
+    for (i = 0; i < MAX_MON_MOVES; i++)
+        SetMonMoveSlot(mon, build->moves[i], i);
+    for (i = 0; i < NUM_STATS; i++)
+        SetMonData(mon, MON_DATA_HP_EV + i, &build->evs[i]);
+    SetMonData(mon, MON_DATA_ABILITY_NUM, &build->abilityNum);
+    SetMonNature(mon, build->nature);
+    CalculateMonStats(mon);
+}
+
+static void Task_HandleRecommendedBuildYesNoInput(u8 taskId)
+{
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+
+    switch (Menu_ProcessInputNoWrapClearOnChoose())
+    {
+    case 0: // Yes
+        ApplyRecommendedBuild(mon);
+        UpdateMonDisplayInfoAfterRareCandy(gPartyMenu.slotId, mon);
+        GetMonNickname(mon, gStringVar1);
+        StringExpandPlaceholders(gStringVar4, gText_PkmnHasRecommendedBuild);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        gTasks[taskId].func = Task_ReturnToTrainMenuAfterText;
+        break;
+    case MENU_B_PRESSED:
+        PlaySE(SE_SELECT);
+        // fallthrough
+    case 1: // No
+        ClearStdWindowAndFrameToTransparent(6, FALSE);
+        ClearWindowTilemap(6);
+        ShowTrainSelectionWindow(taskId);
+        break;
+    }
+}
+
+static void Task_RecommendedBuildYesNo(u8 taskId)
+{
+    if (IsPartyMenuTextPrinterActive() != TRUE)
+    {
+        PartyMenuDisplayYesNoMenu();
+        gTasks[taskId].func = Task_HandleRecommendedBuildYesNoInput;
+    }
+}
+
+static void CursorCB_Recommended(u8 taskId)
+{
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+
+    PlaySE(SE_SELECT);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    GetMonNickname(mon, gStringVar1);
+    if (sRecommendedBuilds[GetMonData(mon, MON_DATA_SPECIES)].moves[0] == MOVE_NONE)
+    {
+        StringExpandPlaceholders(gStringVar4, gText_NoRecommendedBuild);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        gTasks[taskId].func = Task_ReturnToTrainMenuAfterText;
+        return;
+    }
+    StringExpandPlaceholders(gStringVar4, gText_UseRecommendedBuild);
+    DisplayPartyMenuMessage(gStringVar4, TRUE);
+    gTasks[taskId].func = Task_RecommendedBuildYesNo;
 }
 
 static void CursorCB_Ability(u8 taskId)

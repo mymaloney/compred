@@ -2923,6 +2923,7 @@ BattleScript_LocalTrainerBattleWon::
 BattleScript_LocalTrainerBattleWonGotMoney::
 	printstring STRINGID_PLAYERGOTMONEY
 	waitmessage B_WAIT_TIME_LONG
+	call BattleScript_PrintDecisionReport
 BattleScript_PayDayMoneyAndPickUpItems::
 	givepaydaymoney
 	pickup
@@ -2933,7 +2934,15 @@ BattleScript_EndlessBattleDraw::
 	waitmessage B_WAIT_TIME_LONG
 	goto BattleScript_LocalBattleLost
 
+BattleScript_PrintDecisionReport::
+	jumpifbyte CMP_EQUAL, gEvalReportReady, FALSE, BattleScript_PrintDecisionReportEnd
+	printstring STRINGID_DECISIONREPORT
+	waitmessage B_WAIT_TIME_LONG
+BattleScript_PrintDecisionReportEnd::
+	return
+
 BattleScript_LocalBattleLost::
+	call BattleScript_PrintDecisionReport
 	jumpifbattletype BATTLE_TYPE_TRAINER_TOWER, BattleScript_BattleTowerLost
 	jumpifbattletype BATTLE_TYPE_EREADER_TRAINER, BattleScript_EReaderOrSecretBaseTrainerEnd
 	jumpifhalfword CMP_EQUAL, gTrainerBattleOpponent_A, TRAINER_SECRET_BASE, BattleScript_EReaderOrSecretBaseTrainerEnd

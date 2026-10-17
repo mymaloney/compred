@@ -5,6 +5,7 @@
 #include "battle_ai_script_commands.h"
 #include "battle_controllers.h"
 #include "battle_interface.h"
+#include "battle_eval.h"
 #include "battle_main.h"
 #include "battle_message.h"
 #include "battle_scripts.h"
@@ -2234,6 +2235,7 @@ static void BattleStartClearSetData(void)
     u32 j;
     u8 *dataPtr;
 
+    BattleEval_Reset();
     TurnValuesCleanUp(FALSE);
     SpecialStatusesClear();
 
@@ -3409,7 +3411,10 @@ static void HandleTurnActionSelectionState(void)
     }
     // Check if everyone chose actions.
     if (gBattleCommunication[ACTIONS_CONFIRMED_COUNT] == gBattlersCount)
+    {
+        BattleEval_GradeTurn();
         gBattleMainFunc = SetActionsAndBattlersTurnOrder;
+    }
 }
 
 void SwapTurnOrder(u8 id1, u8 id2)
@@ -3758,6 +3763,7 @@ static void RunTurnActionsFunctions(void)
 static void HandleEndTurn_BattleWon(void)
 {
     gCurrentActionFuncId = 0;
+    BattleEval_BuildReport();
     if (gBattleTypeFlags & BATTLE_TYPE_LINK)
     {
         gBattleTextBuff1[0] = gBattleOutcome;
@@ -3801,6 +3807,7 @@ static void HandleEndTurn_BattleWon(void)
 static void HandleEndTurn_BattleLost(void)
 {
     gCurrentActionFuncId = 0;
+    BattleEval_BuildReport();
     if (gBattleTypeFlags & BATTLE_TYPE_LINK)
     {
         gBattleTextBuff1[0] = gBattleOutcome;

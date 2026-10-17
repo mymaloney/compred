@@ -3,6 +3,7 @@
 #include "battle.h"
 #include "battle_anim.h"
 #include "strings.h"
+#include "battle_eval.h"
 #include "battle_message.h"
 #include "link.h"
 #include "event_scripts.h"
@@ -696,6 +697,7 @@ const u8 *const gBattleStringsTable[BATTLESTRINGS_COUNT - BATTLESTRINGS_TABLE_ST
     [STRINGID_MOVEISBANNED - BATTLESTRINGS_TABLE_START]                  = sText_MoveIsBanned,
     [STRINGID_SLEEPCLAUSE - BATTLESTRINGS_TABLE_START]                   = sText_SleepClause,
     [STRINGID_ENDLESSBATTLE - BATTLESTRINGS_TABLE_START]                 = sText_EndlessBattle,
+    [STRINGID_DECISIONREPORT - BATTLESTRINGS_TABLE_START]                = gEvalReportText,
     [STRINGID_PKMNWANTSGRUDGE - BATTLESTRINGS_TABLE_START]               = sText_PkmnWantsGrudge,
     [STRINGID_PKMNLOSTPPGRUDGE - BATTLESTRINGS_TABLE_START]              = sText_PkmnLostPPGrudge,
     [STRINGID_PKMNSHROUDEDITSELF - BATTLESTRINGS_TABLE_START]            = sText_PkmnShroudedItself,

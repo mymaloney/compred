@@ -26,6 +26,7 @@ void SetTrainerFlag(u16 trainerId);
 void ClearTrainerFlag(u16 trainerId);
 void StartTrainerBattle(void);
 void StartRematchBattle(void);
+bool8 IsTrainerBattleDouble(u16 trainerNum);
 void ShowTrainerIntroSpeech(void);
 const u8 *BattleSetup_GetScriptAddrAfterBattle(void);
 const u8 *BattleSetup_GetTrainerPostBattleScript(void);

@@ -26,6 +26,7 @@
 #include "battle.h"
 #include "battle_transition.h"
 #include "battle_controllers.h"
+#include "battle_setup.h"
 #include "constants/battle_setup.h"
 #include "constants/event_objects.h"
 #include "constants/items.h"
@@ -621,6 +622,15 @@ static u8 GetWildBattleTransition(void)
         return sBattleTransitionTable_Wild[transitionType][1];
 }
 
+// Trainer battles are doubles whenever both sides can field two Pokemon.
+bool8 IsTrainerBattleDouble(u16 trainerNum)
+{
+    if (gTrainers[trainerNum].doubleBattle == TRUE)
+        return TRUE;
+    return gTrainers[trainerNum].partySize >= 2
+        && GetMonsStateToDoubles() == PLAYER_HAS_TWO_USABLE_MONS;
+}
+
 static u8 GetTrainerBattleTransition(void)
 {
     u8 minPartyCount;
@@ -644,7 +654,7 @@ static u8 GetTrainerBattleTransition(void)
     }
     if (gTrainers[gTrainerBattleOpponent_A].trainerClass == TRAINER_CLASS_CHAMPION)
         return B_TRANSITION_BLUE;
-    if (gTrainers[gTrainerBattleOpponent_A].doubleBattle == TRUE)
+    if (IsTrainerBattleDouble(gTrainerBattleOpponent_A))
         minPartyCount = 2; // double battles always at least have 2 pokemon.
     else
         minPartyCount = 1;

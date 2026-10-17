@@ -988,7 +988,7 @@ static void HasSpokenToOwner(void)
 static void BuildEnemyParty(void)
 {
     u16 trainerIdx = VarGet(VAR_TEMP_1);
-    s32 level = GetPartyMaxLevel();
+    s32 level = STANDARD_MON_LEVEL;
     u8 floorIdx = TRAINER_TOWER.floorsCleared;
     s32 i;
     u8 monIdx;

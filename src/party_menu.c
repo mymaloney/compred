@@ -149,6 +149,12 @@ static void BlitBitmapToPartyWindow_LeftColumn(u8 windowId, u8 x, u8 y, u8 width
 static void BlitBitmapToPartyWindow_RightColumn(u8 windowId, u8 x, u8 y, u8 width, u8 height, bool8 hideHP);
 static void CursorCB_Summary(u8 taskId);
 static void CursorCB_Moves(u8 taskId);
+static void CursorCB_Train(u8 taskId);
+static void CursorCB_Evolve(u8 taskId);
+static void CursorCB_EvolveTarget(u8 taskId);
+static void CursorCB_IVs(u8 taskId);
+static void CursorCB_Nature(u8 taskId);
+static void CursorCB_Ability(u8 taskId);
 static void CursorCB_Switch(u8 taskId);
 static void CursorCB_Cancel1(u8 taskId);
 static void CursorCB_Item(u8 taskId);
@@ -2485,6 +2491,8 @@ void DisplayPartyMenuStdMessage(u32 stringId)
         switch (stringId)
         {
         case PARTY_MSG_DO_WHAT_WITH_MON:
+        case PARTY_MSG_CHANGE_IVS:
+        case PARTY_MSG_CHOOSE_NATURE:
             *windowPtr = AddWindow(&sDoWhatWithMonMsgWindowTemplate);
             break;
         case PARTY_MSG_DO_WHAT_WITH_ITEM:
@@ -2534,6 +2542,8 @@ static bool8 ShouldUseChooseMonText(void)
     return FALSE;
 }
 
+static EWRAM_DATA u16 sEvolutionTargets[EVOS_PER_MON] = {0};
+
 static u8 DisplaySelectionWindow(u8 windowType)
 {
     struct WindowTemplate window;
@@ -2564,9 +2574,13 @@ static u8 DisplaySelectionWindow(u8 windowType)
     fontAttribute = GetFontAttribute(FONT_NORMAL, FONTATTR_LETTER_SPACING);
     for (i = 0; i < sPartyMenuInternal->numActions; ++i)
     {
-        u8 fontColorsId = (sPartyMenuInternal->actions[i] >= CURSOR_OPTION_FIELD_MOVES) ? 4 : 3;
-        
-        AddTextPrinterParameterized4(sPartyMenuInternal->windowId[0], FONT_NORMAL, cursorDimension, (i * 16) + 2, fontAttribute, 0, sFontColorTable[fontColorsId], 0, sCursorOptions[sPartyMenuInternal->actions[i]].text);
+        u8 action = sPartyMenuInternal->actions[i];
+        u8 fontColorsId = (action >= CURSOR_OPTION_FIELD_MOVES) ? 4 : 3;
+        const u8 *text = sCursorOptions[action].text;
+
+        if (action >= CURSOR_OPTION_EVO_TARGET && action < CURSOR_OPTION_CANCEL_EVOLVE)
+            text = gSpeciesNames[sEvolutionTargets[action - CURSOR_OPTION_EVO_TARGET]];
+        AddTextPrinterParameterized4(sPartyMenuInternal->windowId[0], FONT_NORMAL, cursorDimension, (i * 16) + 2, fontAttribute, 0, sFontColorTable[fontColorsId], 0, text);
     }
     Menu_InitCursorInternal(sPartyMenuInternal->windowId[0], FONT_NORMAL, 0, 2, 16, sPartyMenuInternal->numActions, 0, 1);
     ScheduleBgCopyTilemapToVram(2);
@@ -2972,7 +2986,7 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
 
     sPartyMenuInternal->numActions = 0;
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_SUMMARY);
-    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_MOVES);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_TRAIN);
     // Add field moves to action list
     for (i = 0; i < MAX_MON_MOVES; ++i)
     {
@@ -3148,6 +3162,339 @@ static void CursorCB_Moves(u8 taskId)
     sPartyMenuInternal->exitCallback = CB2_ShowMoveRelearner;
     Task_ClosePartyMenu(taskId);
 }
+
+// ---------------------------------------------------------------------------
+// TRAIN submenu: relearn moves, evolve, and change IVs, nature and ability for free
+// ---------------------------------------------------------------------------
+
+#define tEditorCursor data[1]
+#define tEditorNature data[2]
+
+static EWRAM_DATA u16 sPartyEvolutionTarget = 0;
+
+static const u8 sText_IvHp[] = _("HP");
+static const u8 sText_IvAttack[] = _("ATTACK");
+static const u8 sText_IvDefense[] = _("DEFENSE");
+static const u8 sText_IvSpAtk[] = _("SP. ATK");
+static const u8 sText_IvSpDef[] = _("SP. DEF");
+static const u8 sText_IvSpeed[] = _("SPEED");
+static const u8 sText_NatureNeutral[] = _("NEUTRAL");
+static const u8 sText_NaturePlus[] = _("+");
+static const u8 sText_NatureMinus[] = _(" -");
+
+static const u8 *const sIvStatNames[NUM_STATS] =
+{
+    sText_IvHp, sText_IvAttack, sText_IvDefense, sText_IvSpAtk, sText_IvSpDef, sText_IvSpeed,
+};
+
+static const u8 sIvStatData[NUM_STATS] =
+{
+    MON_DATA_HP_IV, MON_DATA_ATK_IV, MON_DATA_DEF_IV, MON_DATA_SPATK_IV, MON_DATA_SPDEF_IV, MON_DATA_SPEED_IV,
+};
+
+// Short stat names in sNatureStatTable order: Attack, Defense, Speed, Sp. Atk, Sp. Def
+static const u8 sText_NatAtk[] = _("ATK");
+static const u8 sText_NatDef[] = _("DEF");
+static const u8 sText_NatSpe[] = _("SPE");
+static const u8 sText_NatSpA[] = _("SPA");
+static const u8 sText_NatSpD[] = _("SPD");
+static const u8 *const sNatureStatNames[NUM_NATURE_STATS] =
+{
+    sText_NatAtk, sText_NatDef, sText_NatSpe, sText_NatSpA, sText_NatSpD,
+};
+
+static void Task_HandleSelectionMenuInput(u8 taskId);
+
+static void CB2_ReturnToPartyMenuFromTrain(void)
+{
+    gPaletteFade.bufferTransferDisabled = TRUE;
+    InitPartyMenu(gPartyMenu.menuType, KEEP_PARTY_LAYOUT, gPartyMenu.action, TRUE, PARTY_MSG_DO_WHAT_WITH_MON, Task_TryCreateSelectionWindow, gPartyMenu.exitCallback);
+}
+
+static void ShowTrainSelectionWindow(u8 taskId)
+{
+    u16 targets[EVOS_PER_MON];
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    sPartyMenuInternal->numActions = 0;
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_MOVES);
+    if (GetMonEvolutionTargets(GetMonData(mon, MON_DATA_SPECIES), targets) != 0)
+        AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_EVOLVE);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_IVS);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_NATURE);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_ABILITY);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_CANCEL_TRAIN);
+    DisplaySelectionWindow(SELECTWINDOW_ACTIONS);
+    DisplayPartyMenuStdMessage(PARTY_MSG_DO_WHAT_WITH_MON);
+    gTasks[taskId].data[0] = (u8)MENU_B_PRESSED;
+    gTasks[taskId].func = Task_HandleSelectionMenuInput;
+}
+
+static void CursorCB_Train(u8 taskId)
+{
+    PlaySE(SE_SELECT);
+    ShowTrainSelectionWindow(taskId);
+}
+
+static void Task_ReturnToTrainMenuAfterText(u8 taskId)
+{
+    if (IsPartyMenuTextPrinterActive() != TRUE)
+    {
+        ClearStdWindowAndFrameToTransparent(6, FALSE);
+        ClearWindowTilemap(6);
+        ShowTrainSelectionWindow(taskId);
+    }
+}
+
+static void CB2_StartPartyMenuEvolution(void)
+{
+    gCB2_AfterEvolution = CB2_ReturnToPartyMenuFromTrain;
+    BeginEvolutionScene(&gPlayerParty[gPartyMenu.slotId], sPartyEvolutionTarget, FALSE, gPartyMenu.slotId);
+}
+
+static void StartPartyMenuEvolution(u8 taskId, u16 targetSpecies)
+{
+    sPartyEvolutionTarget = targetSpecies;
+    sPartyMenuInternal->exitCallback = CB2_StartPartyMenuEvolution;
+    Task_ClosePartyMenu(taskId);
+}
+
+static void CursorCB_Evolve(u8 taskId)
+{
+    u8 i, numTargets;
+
+    PlaySE(SE_SELECT);
+    numTargets = GetMonEvolutionTargets(GetMonData(&gPlayerParty[gPartyMenu.slotId], MON_DATA_SPECIES), sEvolutionTargets);
+    if (numTargets == 1)
+    {
+        StartPartyMenuEvolution(taskId, sEvolutionTargets[0]);
+        return;
+    }
+
+    // Branching evolution: let the player pick the target
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    sPartyMenuInternal->numActions = 0;
+    for (i = 0; i < numTargets; i++)
+        AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_EVO_TARGET + i);
+    AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, CURSOR_OPTION_CANCEL_EVOLVE);
+    DisplaySelectionWindow(SELECTWINDOW_ACTIONS);
+    DisplayPartyMenuStdMessage(PARTY_MSG_DO_WHAT_WITH_MON);
+    gTasks[taskId].data[0] = (u8)MENU_B_PRESSED;
+    gTasks[taskId].func = Task_HandleSelectionMenuInput;
+}
+
+static void CursorCB_EvolveTarget(u8 taskId)
+{
+    u8 action = sPartyMenuInternal->actions[Menu_GetCursorPos()];
+
+    PlaySE(SE_SELECT);
+    StartPartyMenuEvolution(taskId, sEvolutionTargets[action - CURSOR_OPTION_EVO_TARGET]);
+}
+
+static u8 AddTrainEditorWindow(u8 numRows)
+{
+    struct WindowTemplate window = SetWindowTemplateFields(2, 19, 19 - numRows * 2, 10, numRows * 2, 14, 0x2BF);
+
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    sPartyMenuInternal->windowId[0] = AddWindow(&window);
+    DrawStdFrameWithCustomTileAndPalette(sPartyMenuInternal->windowId[0], FALSE, 0x4F, 13);
+    return sPartyMenuInternal->windowId[0];
+}
+
+static void PrintTrainEditorText(u8 windowId, const u8 *text, u8 x, u8 row)
+{
+    AddTextPrinterParameterized4(windowId, FONT_NORMAL, x, row * 16 + 2, GetFontAttribute(FONT_NORMAL, FONTATTR_LETTER_SPACING), 0, sFontColorTable[3], 0, text);
+}
+
+static void DrawIVEditor(u8 cursorPos)
+{
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+    u8 windowId = sPartyMenuInternal->windowId[0];
+    u8 cursorWidth = GetMenuCursorDimensionByFont(FONT_NORMAL, 0);
+    u8 i;
+
+    FillWindowPixelBuffer(windowId, PIXEL_FILL(TEXT_COLOR_WHITE));
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        PrintTrainEditorText(windowId, sIvStatNames[i], cursorWidth, i);
+        ConvertIntToDecimalStringN(gStringVar1, GetMonData(mon, sIvStatData[i]), STR_CONV_MODE_RIGHT_ALIGN, 2);
+        PrintTrainEditorText(windowId, gStringVar1, 62, i);
+    }
+    Menu_InitCursorInternal(windowId, FONT_NORMAL, 0, 2, 16, NUM_STATS, cursorPos, TRUE);
+    CopyWindowToVram(windowId, COPYWIN_FULL);
+}
+
+static void Task_HandleIVEditorInput(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+
+    if (gPaletteFade.active)
+        return;
+
+    if (JOY_NEW(DPAD_UP))
+    {
+        PlaySE(SE_SELECT);
+        tEditorCursor = Menu_MoveCursor(-1);
+    }
+    else if (JOY_NEW(DPAD_DOWN))
+    {
+        PlaySE(SE_SELECT);
+        tEditorCursor = Menu_MoveCursor(1);
+    }
+    else if (JOY_REPT(DPAD_LEFT | DPAD_RIGHT) || JOY_NEW(START_BUTTON))
+    {
+        u8 i;
+
+        if (JOY_NEW(START_BUTTON))
+        {
+            u8 maxIV = MAX_PER_STAT_IVS;
+
+            for (i = 0; i < NUM_STATS; i++)
+                SetMonData(mon, sIvStatData[i], &maxIV);
+        }
+        else
+        {
+            u8 iv = GetMonData(mon, sIvStatData[tEditorCursor]);
+
+            if (JOY_REPT(DPAD_LEFT))
+                iv = (iv == 0) ? MAX_PER_STAT_IVS : iv - 1;
+            else
+                iv = (iv == MAX_PER_STAT_IVS) ? 0 : iv + 1;
+            SetMonData(mon, sIvStatData[tEditorCursor], &iv);
+        }
+        PlaySE(SE_SELECT);
+        DrawIVEditor(tEditorCursor);
+    }
+    else if (JOY_NEW(A_BUTTON | B_BUTTON))
+    {
+        PlaySE(SE_SELECT);
+        CalculateMonStats(mon);
+        UpdateMonDisplayInfoAfterRareCandy(gPartyMenu.slotId, mon);
+        ShowTrainSelectionWindow(taskId);
+    }
+}
+
+static void CursorCB_IVs(u8 taskId)
+{
+    PlaySE(SE_SELECT);
+    AddTrainEditorWindow(NUM_STATS);
+    gTasks[taskId].tEditorCursor = 0;
+    DrawIVEditor(0);
+    DisplayPartyMenuStdMessage(PARTY_MSG_CHANGE_IVS);
+    gTasks[taskId].func = Task_HandleIVEditorInput;
+}
+
+static void DrawNaturePicker(u8 nature)
+{
+    u8 windowId = sPartyMenuInternal->windowId[0];
+    u8 *str = gStringVar1;
+    u8 i, raised = NUM_NATURE_STATS, lowered = NUM_NATURE_STATS;
+
+    FillWindowPixelBuffer(windowId, PIXEL_FILL(TEXT_COLOR_WHITE));
+    PrintTrainEditorText(windowId, gNatureNamePointers[nature], 8, 0);
+    for (i = 0; i < NUM_NATURE_STATS; i++)
+    {
+        if (GetNatureStatEffect(nature, i) > 0)
+            raised = i;
+        else if (GetNatureStatEffect(nature, i) < 0)
+            lowered = i;
+    }
+    if (raised == NUM_NATURE_STATS)
+    {
+        StringCopy(str, sText_NatureNeutral);
+    }
+    else
+    {
+        str = StringCopy(str, sText_NaturePlus);
+        str = StringCopy(str, sNatureStatNames[raised]);
+        str = StringCopy(str, sText_NatureMinus);
+        StringCopy(str, sNatureStatNames[lowered]);
+    }
+    PrintTrainEditorText(windowId, gStringVar1, 8, 1);
+    CopyWindowToVram(windowId, COPYWIN_FULL);
+}
+
+static void Task_HandleNaturePickerInput(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+
+    if (gPaletteFade.active)
+        return;
+
+    if (JOY_REPT(DPAD_LEFT | DPAD_RIGHT))
+    {
+        PlaySE(SE_SELECT);
+        if (JOY_REPT(DPAD_LEFT))
+            tEditorNature = (tEditorNature == 0) ? NUM_NATURES - 1 : tEditorNature - 1;
+        else
+            tEditorNature = (tEditorNature == NUM_NATURES - 1) ? 0 : tEditorNature + 1;
+        DrawNaturePicker(tEditorNature);
+    }
+    else if (JOY_NEW(A_BUTTON))
+    {
+        PlaySE(SE_SELECT);
+        SetMonNature(mon, tEditorNature);
+        UpdateMonDisplayInfoAfterRareCandy(gPartyMenu.slotId, mon);
+        PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+        PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+        GetMonNickname(mon, gStringVar1);
+        StringCopy(gStringVar2, gNatureNamePointers[GetNature(mon)]);
+        StringExpandPlaceholders(gStringVar4, gText_PkmnNatureNowX);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = Task_ReturnToTrainMenuAfterText;
+    }
+    else if (JOY_NEW(B_BUTTON))
+    {
+        PlaySE(SE_SELECT);
+        ShowTrainSelectionWindow(taskId);
+    }
+}
+
+static void CursorCB_Nature(u8 taskId)
+{
+    PlaySE(SE_SELECT);
+    AddTrainEditorWindow(2);
+    gTasks[taskId].tEditorNature = GetNature(&gPlayerParty[gPartyMenu.slotId]);
+    DrawNaturePicker(gTasks[taskId].tEditorNature);
+    DisplayPartyMenuStdMessage(PARTY_MSG_CHOOSE_NATURE);
+    gTasks[taskId].func = Task_HandleNaturePickerInput;
+}
+
+static void CursorCB_Ability(u8 taskId)
+{
+    struct Pokemon *mon = &gPlayerParty[gPartyMenu.slotId];
+    u16 species = GetMonData(mon, MON_DATA_SPECIES);
+
+    PlaySE(SE_SELECT);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    GetMonNickname(mon, gStringVar1);
+    if (gSpeciesInfo[species].abilities[1] != ABILITY_NONE && gSpeciesInfo[species].abilities[1] != gSpeciesInfo[species].abilities[0])
+    {
+        u8 abilityNum = GetMonData(mon, MON_DATA_ABILITY_NUM) ^ 1;
+
+        SetMonData(mon, MON_DATA_ABILITY_NUM, &abilityNum);
+        StringCopy(gStringVar2, gAbilityNames[GetMonAbility(mon)]);
+        StringExpandPlaceholders(gStringVar4, gText_PkmnAbilityNowX);
+    }
+    else
+    {
+        StringExpandPlaceholders(gStringVar4, gText_PkmnHasOnlyOneAbility);
+    }
+    DisplayPartyMenuMessage(gStringVar4, TRUE);
+    ScheduleBgCopyTilemapToVram(2);
+    gTasks[taskId].func = Task_ReturnToTrainMenuAfterText;
+}
+
+#undef tEditorCursor
+#undef tEditorNature
 
 static void CursorCB_Switch(u8 taskId)
 {

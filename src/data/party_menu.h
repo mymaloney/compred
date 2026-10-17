@@ -629,6 +629,8 @@ static const u8 *const sActionStringTable[] =
     [PARTY_MSG_BOOST_PP_WHICH_MOVE]    = gText_BoostPp,
     [PARTY_MSG_DO_WHAT_WITH_ITEM]      = gText_DoWhatWithItem,
     [PARTY_MSG_DO_WHAT_WITH_MAIL]      = gText_DoWhatWithMail,
+    [PARTY_MSG_CHANGE_IVS]             = gText_ChangeIVs,
+    [PARTY_MSG_CHOOSE_NATURE]          = gText_ChooseNature,
 };
 
 static const u8 *const sDescriptionStringTable[] =
@@ -1049,7 +1051,15 @@ enum
     CURSOR_OPTION_REGISTER,
     CURSOR_OPTION_TRADE1,
     CURSOR_OPTION_TRADE2,
+    CURSOR_OPTION_TRAIN,
     CURSOR_OPTION_MOVES,
+    CURSOR_OPTION_EVOLVE,
+    CURSOR_OPTION_IVS,
+    CURSOR_OPTION_NATURE,
+    CURSOR_OPTION_ABILITY,
+    CURSOR_OPTION_CANCEL_TRAIN,
+    CURSOR_OPTION_EVO_TARGET,
+    CURSOR_OPTION_CANCEL_EVOLVE = CURSOR_OPTION_EVO_TARGET + EVOS_PER_MON,
     CURSOR_OPTION_FIELD_MOVES,
 };
 
@@ -1077,7 +1087,20 @@ static struct
     [CURSOR_OPTION_REGISTER]                             = {gText_Register,               CursorCB_Register },
     [CURSOR_OPTION_TRADE1]                               = {gText_Trade4,                 CursorCB_Trade1   },
     [CURSOR_OPTION_TRADE2]                               = {gText_Trade4,                 CursorCB_Trade2   },
+    [CURSOR_OPTION_TRAIN]                                = {gText_PartyMenuTrain,         CursorCB_Train    },
     [CURSOR_OPTION_MOVES]                                = {gText_PartyMenuMoves,         CursorCB_Moves    },
+    [CURSOR_OPTION_EVOLVE]                               = {gText_PartyMenuEvolve,        CursorCB_Evolve   },
+    [CURSOR_OPTION_IVS]                                  = {gText_PartyMenuIVs,           CursorCB_IVs      },
+    [CURSOR_OPTION_NATURE]                               = {gText_PartyMenuNature,        CursorCB_Nature   },
+    [CURSOR_OPTION_ABILITY]                              = {gText_PartyMenuAbility,       CursorCB_Ability  },
+    [CURSOR_OPTION_CANCEL_TRAIN]                         = {gFameCheckerText_Cancel,      CursorCB_Cancel2  },
+    // Evolution target names are filled in from sEvolutionTargets when drawn
+    [CURSOR_OPTION_EVO_TARGET + 0]                       = {gText_PartyMenuEvolve,        CursorCB_EvolveTarget},
+    [CURSOR_OPTION_EVO_TARGET + 1]                       = {gText_PartyMenuEvolve,        CursorCB_EvolveTarget},
+    [CURSOR_OPTION_EVO_TARGET + 2]                       = {gText_PartyMenuEvolve,        CursorCB_EvolveTarget},
+    [CURSOR_OPTION_EVO_TARGET + 3]                       = {gText_PartyMenuEvolve,        CursorCB_EvolveTarget},
+    [CURSOR_OPTION_EVO_TARGET + 4]                       = {gText_PartyMenuEvolve,        CursorCB_EvolveTarget},
+    [CURSOR_OPTION_CANCEL_EVOLVE]                        = {gFameCheckerText_Cancel,      CursorCB_Train    },
     [CURSOR_OPTION_FIELD_MOVES + FIELD_MOVE_FLASH]       = {gMoveNames[MOVE_FLASH],       CursorCB_FieldMove},
     [CURSOR_OPTION_FIELD_MOVES + FIELD_MOVE_CUT]         = {gMoveNames[MOVE_CUT],         CursorCB_FieldMove},
     [CURSOR_OPTION_FIELD_MOVES + FIELD_MOVE_FLY]         = {gMoveNames[MOVE_FLY],         CursorCB_FieldMove},

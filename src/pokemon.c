@@ -2108,17 +2108,17 @@ void CalculateMonStats(struct Pokemon *mon)
     s32 oldMaxHP = GetMonData(mon, MON_DATA_MAX_HP, NULL);
     s32 currentHP = GetMonData(mon, MON_DATA_HP, NULL);
     s32 hpIV = GetMonData(mon, MON_DATA_HP_IV, NULL);
-    s32 hpEV = GetMonData(mon, MON_DATA_HP_EV, NULL);
+    s32 hpEV = PERFECT_EVS;
     s32 attackIV = GetMonData(mon, MON_DATA_ATK_IV, NULL);
-    s32 attackEV = GetMonData(mon, MON_DATA_ATK_EV, NULL);
+    s32 attackEV = PERFECT_EVS;
     s32 defenseIV = GetMonData(mon, MON_DATA_DEF_IV, NULL);
-    s32 defenseEV = GetMonData(mon, MON_DATA_DEF_EV, NULL);
+    s32 defenseEV = PERFECT_EVS;
     s32 speedIV = GetMonData(mon, MON_DATA_SPEED_IV, NULL);
-    s32 speedEV = GetMonData(mon, MON_DATA_SPEED_EV, NULL);
+    s32 speedEV = PERFECT_EVS;
     s32 spAttackIV = GetMonData(mon, MON_DATA_SPATK_IV, NULL);
-    s32 spAttackEV = GetMonData(mon, MON_DATA_SPATK_EV, NULL);
+    s32 spAttackEV = PERFECT_EVS;
     s32 spDefenseIV = GetMonData(mon, MON_DATA_SPDEF_IV, NULL);
-    s32 spDefenseEV = GetMonData(mon, MON_DATA_SPDEF_EV, NULL);
+    s32 spDefenseEV = PERFECT_EVS;
     u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
     s32 level = GetLevelFromMonExp(mon);
     s32 newMaxHP;
@@ -3690,10 +3690,27 @@ void CopyMon(void *dest, void *src, size_t size)
     memcpy(dest, src, size);
 }
 
+// Sets the Pokemon to STANDARD_MON_LEVEL and fully restores its HP.
+void SetMonToStandardLevel(struct Pokemon *mon)
+{
+    u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
+    u32 exp;
+    u16 hp;
+
+    if (species == SPECIES_NONE)
+        return;
+    exp = gExperienceTables[gSpeciesInfo[species].growthRate][STANDARD_MON_LEVEL];
+    SetMonData(mon, MON_DATA_EXP, &exp);
+    CalculateMonStats(mon);
+    hp = GetMonData(mon, MON_DATA_MAX_HP, NULL);
+    SetMonData(mon, MON_DATA_HP, &hp);
+}
+
 u8 GiveMonToPlayer(struct Pokemon *mon)
 {
     s32 i;
 
+    SetMonToStandardLevel(mon);
     SetMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
     SetMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
     SetMonData(mon, MON_DATA_OT_ID, gSaveBlock2Ptr->playerTrainerId);
@@ -5078,6 +5095,72 @@ const u8 *Battle_PrintStatBoosterEffectMessage(u16 itemId)
     return gDisplayedStringBattle;
 }
 
+// Returns +1, -1 or 0 for how the nature affects a stat (0 = Attack ... 4 = Sp. Def).
+s8 GetNatureStatEffect(u8 nature, u8 statIndex)
+{
+    return sNatureStatTable[nature][statIndex];
+}
+
+// Changes the Pokemon's nature by picking a new personality value with the same gender,
+// shininess and Unown letter, then re-encrypting its data under the new personality.
+void SetMonNature(struct Pokemon *mon, u8 nature)
+{
+    struct BoxPokemon *boxMon = &mon->box;
+    union PokemonSubstruct substructs[4];
+    u32 oldPersonality = boxMon->personality;
+    u32 otId = boxMon->otId;
+    bool8 isShiny = IsShinyOtIdPersonality(otId, oldPersonality);
+    u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
+    u32 newPersonality, i;
+
+    if (GetNatureFromPersonality(oldPersonality) == nature)
+        return;
+
+    // Keep the low byte (gender) and search the upper bytes for a matching personality
+    for (i = 1; i < 0x1000000; i++)
+    {
+        newPersonality = (oldPersonality & 0xFF) | ((((oldPersonality >> 8) + i) & 0xFFFFFF) << 8);
+        if (GetNatureFromPersonality(newPersonality) != nature)
+            continue;
+        if (IsShinyOtIdPersonality(otId, newPersonality) != isShiny)
+            continue;
+        if (species == SPECIES_UNOWN && GET_UNOWN_LETTER(newPersonality) != GET_UNOWN_LETTER(oldPersonality))
+            continue;
+        break;
+    }
+    if (i == 0x1000000)
+        return;
+
+    DecryptBoxMon(boxMon);
+    for (i = 0; i < 4; i++)
+        substructs[i] = *GetSubstruct(boxMon, oldPersonality, i);
+    boxMon->personality = newPersonality;
+    for (i = 0; i < 4; i++)
+        *GetSubstruct(boxMon, newPersonality, i) = substructs[i];
+    EncryptBoxMon(boxMon);
+    CalculateMonStats(mon);
+}
+
+// Fills targets with the species this Pokemon can evolve into (Shedinja is a side effect of Ninjask).
+u8 GetMonEvolutionTargets(u16 species, u16 *targets)
+{
+    u8 numTargets = 0;
+    s32 i, j;
+
+    for (i = 0; i < EVOS_PER_MON; i++)
+    {
+        u16 target = gEvolutionTable[species][i].targetSpecies;
+
+        if (gEvolutionTable[species][i].method == 0 || gEvolutionTable[species][i].method == EVO_LEVEL_SHEDINJA)
+            continue;
+        for (j = 0; j < numTargets && targets[j] != target; j++)
+            ;
+        if (j == numTargets)
+            targets[numTargets++] = target;
+    }
+    return numTargets;
+}
+
 u8 GetNature(struct Pokemon *mon)
 {
     return GetMonData(mon, MON_DATA_PERSONALITY, NULL) % NUM_NATURES;
@@ -5824,7 +5907,7 @@ static bool8 TryAddRelearnerMove(u16 *moves, u8 *numMoves, const u16 *learnedMov
     return TRUE;
 }
 
-// Every move the Pokemon can relearn for free: its level-up moves up to its current level,
+// Every move the Pokemon can relearn for free: its level-up moves,
 // followed by its egg, TM/HM, tutor and other Gen 9 moves in alphabetical order.
 u8 GetMoveRelearnerMoves(struct Pokemon *mon, u16 *moves)
 {
@@ -5833,17 +5916,14 @@ u8 GetMoveRelearnerMoves(struct Pokemon *mon, u16 *moves)
     u8 numMoves = 0;
     u8 numLevelUpMoves, numEggMoves;
     u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
-    u8 level = GetMonData(mon, MON_DATA_LEVEL, NULL);
     s32 i, j;
 
     for (i = 0; i < MAX_MON_MOVES; i++)
         learnedMoves[i] = GetMonData(mon, MON_DATA_MOVE1 + i, NULL);
 
+    // Pokemon no longer gain levels, so every level-up move is offered
     for (i = 0; i < MAX_LEVEL_UP_MOVES && gLevelUpLearnsets[species][i] != LEVEL_UP_END; i++)
-    {
-        if ((gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_LV) <= (level << 9))
-            TryAddRelearnerMove(moves, &numMoves, learnedMoves, gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID);
-    }
+        TryAddRelearnerMove(moves, &numMoves, learnedMoves, gLevelUpLearnsets[species][i] & LEVEL_UP_MOVE_ID);
     numLevelUpMoves = numMoves;
 
     numEggMoves = GetEvolutionLineEggMoves(species, eggMoves, ARRAY_COUNT(eggMoves));

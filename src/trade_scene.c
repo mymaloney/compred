@@ -2456,7 +2456,7 @@ static void BufferInGameTradeMonName(void)
 static void CreateInGameTradePokemonInternal(u8 playerSlot, u8 inGameTradeIdx)
 {
     const struct InGameTrade * inGameTrade = &sInGameTrades[inGameTradeIdx];
-    u8 level = GetMonData(&gPlayerParty[playerSlot], MON_DATA_LEVEL);
+    u8 level = STANDARD_MON_LEVEL;
     struct Mail mail;
     u8 metLocation = METLOC_IN_GAME_TRADE;
     struct Pokemon * tradeMon = &gEnemyParty[0];

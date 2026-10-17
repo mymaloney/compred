@@ -245,13 +245,16 @@ void StartWildBattle(void)
         DoStandardWildBattle();
 }
 
+// Random wild encounters use Safari Zone rules, with infinite Safari Balls
 static void DoStandardWildBattle(void)
 {
     LockPlayerFieldControls();
     FreezeObjectEvents();
     StopPlayerAvatar();
     gMain.savedCallback = CB2_EndWildBattle;
-    gBattleTypeFlags = 0;
+    gBattleTypeFlags = BATTLE_TYPE_SAFARI;
+    if (gNumSafariBalls == 0)
+        gNumSafariBalls = 30;
     CreateBattleStartTask(GetWildBattleTransition(), 0);
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);

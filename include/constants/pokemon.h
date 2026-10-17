@@ -213,6 +213,11 @@
 #define LEVEL_UP_END       0xFFFF
 
 #define MAX_LEVEL_UP_MOVES       32
+
+// Every Pokemon the player obtains and every trainer's Pokemon is set to this level
+#define STANDARD_MON_LEVEL       50
+// Every Pokemon's stats are calculated as if it had this many EVs in each stat
+#define PERFECT_EVS              252
 #define MAX_RELEARNER_MOVES      200
 
 #define MON_MALE       0x00
